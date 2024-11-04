@@ -22,7 +22,7 @@ Building the Code
 
    wget https://github.com/catchorg/Catch2/releases/download/v2.13.10/catch.hpp
 
-   scons libtorch=/home/alex/.conda/envs/pytorch/lib/python3.11/site-packages/torch libxsmm=$(pwd)/libxsmm blas=$(pwd)/openblas -j4
+   scons libtorch=/usr/local/lib/python3.12/dist-packages/torch libxsmm=$(pwd)/libxsmm blas=$(pwd)/openblas -j4
 
 Benchmarking Einsum Expressions
 -------------------------------
