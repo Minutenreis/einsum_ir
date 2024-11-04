@@ -1,0 +1,8 @@
+/OpenBLAS-0.3.26
+/build/**
+.sconsign.dblite
+openblas
+catch.hpp
+config.log
+.sconf_temp
+.vscode
