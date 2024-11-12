@@ -175,6 +175,8 @@ void blocked_matmul() {
     std::cout << "  gflops: " << l_gflops << std::endl;
   }
 
+  auto l_gflops_old = l_gflops;
+
   /*
    * einsum_ir mpi
    */
@@ -199,97 +201,101 @@ void blocked_matmul() {
       std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1 - l_tp0);
   l_time_compile = l_dur.count();
 
-  // dry run
-
   // wait on all MPI processes
-  MPI_Barrier(MPI_COMM_WORLD);
+  for (int i = 0; i < 2; i++) {
+    MPI_Barrier(MPI_COMM_WORLD);
 
-  if (rank == 0) {
-    l_tp0 = std::chrono::steady_clock::now();
+    if (rank == 0) {
+      l_tp0 = std::chrono::steady_clock::now();
 
-    // split tensor
-    auto l_ten_left_mpi_split = l_ten_left.split(2, 0);
-    auto l_ten_right_mpi_split = l_ten_right.split(2, 0);
-    auto l_ten_out_mpi_split = l_ten_out.split(2, 0);
+      // split tensor
+      auto l_ten_left_mpi_split = l_ten_left.split(2, 0);
+      auto l_ten_right_mpi_split = l_ten_right.split(2, 0);
+      auto l_ten_out_mpi_split = l_ten_out.split(2, 0);
 
-    // broadcast? async?
-    // send tensor to other rank
-    MPI_Send(l_ten_left_mpi_split[1].data_ptr(),
-             l_ten_left_mpi_split[1].numel(), MPI_FLOAT, 1, 0, MPI_COMM_WORLD);
-    MPI_Send(l_ten_right_mpi_split[1].data_ptr(),
-             l_ten_right_mpi_split[1].numel(), MPI_FLOAT, 1, 0, MPI_COMM_WORLD);
+      // broadcast? async?
+      // send tensor to other rank
+      MPI_Send(l_ten_left_mpi_split[1].data_ptr(),
+               l_ten_left_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
+               MPI_COMM_WORLD);
+      MPI_Send(l_ten_right_mpi_split[1].data_ptr(),
+               l_ten_right_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
+               MPI_COMM_WORLD);
 
-    // perform local computation
-    l_bin_cont_mpi.contract(l_ten_left_mpi_split[0].data_ptr(),
-                            l_ten_right_mpi_split[0].data_ptr(),
-                            l_ten_out_mpi_split[0].data_ptr());
+      // perform local computation
+      l_bin_cont_mpi.contract(l_ten_left_mpi_split[0].data_ptr(),
+                              l_ten_right_mpi_split[0].data_ptr(),
+                              l_ten_out_mpi_split[0].data_ptr());
 
-    MPI_Recv(l_ten_out_mpi_split[1].data_ptr(), l_ten_out_mpi_split[1].numel(),
-             MPI_FLOAT, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      MPI_Recv(l_ten_out_mpi_split[1].data_ptr(),
+               l_ten_out_mpi_split[1].numel(), MPI_FLOAT, 1, 0, MPI_COMM_WORLD,
+               MPI_STATUS_IGNORE);
 
-    auto l_ten_out_mpi_merged =
-        at::cat({l_ten_out_mpi_split[0], l_ten_out_mpi_split[1]}, 0);
+      auto l_ten_out_mpi_merged =
+          at::cat({l_ten_out_mpi_split[0], l_ten_out_mpi_split[1]}, 0);
 
-    l_tp1 = std::chrono::steady_clock::now();
-    l_dur = std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1 -
-                                                                      l_tp0);
-    l_time = l_dur.count();
-    auto l_gflops_old = l_gflops;
-    l_gflops = 1.0E-9 * l_n_flops / l_time;
+      l_tp1 = std::chrono::steady_clock::now();
+      l_dur = std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1 -
+                                                                        l_tp0);
+      l_time = l_dur.count();
+      if (i > 0) {
+        l_gflops = 1.0E-9 * l_n_flops / l_time;
 
-    std::cout << "  time (compile): " << l_time_compile << std::endl;
-    std::cout << "  time (contract): " << l_time << std::endl;
-    std::cout << "  gflops: " << l_gflops << std::endl;
-    std::cout << "  Speedup: " << l_gflops / l_gflops_old << std::endl;
+        std::cout << "  time (compile): " << l_time_compile << std::endl;
+        std::cout << "  time (contract): " << l_time << std::endl;
+        std::cout << "  gflops: " << l_gflops << std::endl;
+        std::cout << "  Speedup: " << l_gflops / l_gflops_old << std::endl;
 
-    // if (!at::allclose(l_ten_out_mpi_merged, l_ten_out)) {
-    //   std::cerr << "error: einsum_ir_mpi solution is not close to
-    //   einsum_ir!"
-    //             << std::endl;
-    // }
-  } else {
-    // todo: wie übertrage ich richtige größen? die braucht man auch schon fürs
-    // compilen ...
+        if (!at::allclose(l_ten_out_mpi_merged, l_ten_out)) {
+          std::cerr
+              << "error: einsum_ir_mpi solution is not close to einsum_ir !"
+              << std::endl;
+        }
+      }
+    } else {
+      // todo: wie übertrage ich richtige größen? die braucht man auch schon
+      // fürs compilen ...
 
-    auto l_ten_left_mpi = at::zeros({
-        l_size_c0 / 2, // 0
-        l_size_c1,     // 1
-        l_size_c2,     // 2
-        l_size_m0,     // 6
-        l_size_k0,     // 3
-        l_size_k1,     // 4
-        l_size_k2,     // 5
-        l_size_m1      // 7
-    });
-    auto l_ten_right_mpi = at::zeros({
-        l_size_c0 / 2, // 0
-        l_size_c1,     // 1
-        l_size_c2,     // 2
-        l_size_n0,     // 3
-        l_size_k0,     // 5
-        l_size_k1,     // 6
-        l_size_n1,     // 4
-        l_size_k2      // 7
-    });
-    auto l_ten_out_mpi = at::zeros({
-        l_size_c0 / 2, // 0
-        l_size_c1,     // 1
-        l_size_c2,     // 2
-        l_size_n0,     // 5
-        l_size_n1,     // 6
-        l_size_m0,     // 3
-        l_size_m1      // 4
-    });
+      auto l_ten_left_mpi = at::zeros({
+          l_size_c0 / 2, // 0
+          l_size_c1,     // 1
+          l_size_c2,     // 2
+          l_size_m0,     // 6
+          l_size_k0,     // 3
+          l_size_k1,     // 4
+          l_size_k2,     // 5
+          l_size_m1      // 7
+      });
+      auto l_ten_right_mpi = at::zeros({
+          l_size_c0 / 2, // 0
+          l_size_c1,     // 1
+          l_size_c2,     // 2
+          l_size_n0,     // 3
+          l_size_k0,     // 5
+          l_size_k1,     // 6
+          l_size_n1,     // 4
+          l_size_k2      // 7
+      });
+      auto l_ten_out_mpi = at::zeros({
+          l_size_c0 / 2, // 0
+          l_size_c1,     // 1
+          l_size_c2,     // 2
+          l_size_n0,     // 5
+          l_size_n1,     // 6
+          l_size_m0,     // 3
+          l_size_m1      // 4
+      });
 
-    MPI_Recv(l_ten_left_mpi.data_ptr(), l_ten_left_mpi.numel(), MPI_FLOAT, 0, 0,
-             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    MPI_Recv(l_ten_right_mpi.data_ptr(), l_ten_right_mpi.numel(), MPI_FLOAT, 0,
-             0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
-                            l_ten_right_mpi.data_ptr(),
-                            l_ten_out_mpi.data_ptr());
-    MPI_Send(l_ten_out_mpi.data_ptr(), l_ten_out_mpi.numel(), MPI_FLOAT, 0, 0,
-             MPI_COMM_WORLD);
+      MPI_Recv(l_ten_left_mpi.data_ptr(), l_ten_left_mpi.numel(), MPI_FLOAT, 0,
+               0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      MPI_Recv(l_ten_right_mpi.data_ptr(), l_ten_right_mpi.numel(), MPI_FLOAT,
+               0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
+                              l_ten_right_mpi.data_ptr(),
+                              l_ten_out_mpi.data_ptr());
+      MPI_Send(l_ten_out_mpi.data_ptr(), l_ten_out_mpi.numel(), MPI_FLOAT, 0, 0,
+               MPI_COMM_WORLD);
+    }
   }
 }
 
