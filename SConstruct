@@ -203,6 +203,10 @@ if( g_env['libxsmm'] and g_env['libtorch'] ):
                  source = g_env.sources + g_env.exe['bench_expression'] )
   g_env.Program( g_env['build_dir']+'/bench_mlp',
                  source = g_env.sources + g_env.exe['bench_mlp'] )
-
+  
 g_env.Program( g_env['build_dir']+'/tests',
                source = g_env.tests )
+
+g_env["CXX"] = "/usr/bin/mpicxx"
+g_env.Program( g_env['build_dir']+'/bench_binary_mpi',
+                 source = g_env.sources + g_env.exe['bench_binary_mpi'] )
