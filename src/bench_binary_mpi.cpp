@@ -93,7 +93,7 @@ void blocked_binary_contraction() {
   if (rank == 0) {
     l_ten_left = at::rand({l_size_c, l_size_k, l_size_m});
     l_ten_right = at::rand({l_size_c, l_size_n, l_size_k});
-    l_ten_out = at::rand({l_size_c, l_size_n, l_size_m});
+    l_ten_out = at::zeros({l_size_c, l_size_n, l_size_m});
 
     /**
      * einsum data
@@ -215,8 +215,14 @@ void blocked_binary_contraction() {
 
         // split tensor
         auto l_ten_left_mpi_split = l_ten_left.chunk(2, 0);
+        l_ten_left_mpi_split[0] = l_ten_left_mpi_split[0].contiguous();
+        l_ten_left_mpi_split[1] = l_ten_left_mpi_split[1].contiguous();
         auto l_ten_right_mpi_split = l_ten_right.chunk(2, 0);
-        auto l_ten_out_mpi_split = l_ten_out.chunk(2, 0);
+        l_ten_right_mpi_split[0] = l_ten_right_mpi_split[0].contiguous();
+        l_ten_right_mpi_split[1] = l_ten_right_mpi_split[1].contiguous();
+        auto l_ten_out_mpi_split = at::zeros_like(l_ten_out).chunk(2, 0);
+        l_ten_out_mpi_split[0] = l_ten_out_mpi_split[0].contiguous();
+        l_ten_out_mpi_split[1] = l_ten_out_mpi_split[1].contiguous();
 
         // broadcast? async?
         // send tensor to other rank
@@ -237,7 +243,7 @@ void blocked_binary_contraction() {
                  MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
         auto l_ten_out_mpi_merged =
-            at::cat({l_ten_out_mpi_split[0], l_ten_out_mpi_split[1]}, 0);
+            at::cat({l_ten_out_mpi_split[0], l_ten_out_mpi_split[1]}, 0).contiguous();
 
         l_tp1 = std::chrono::steady_clock::now();
         l_dur = std::chrono::duration_cast<std::chrono::duration<double>>(
@@ -253,8 +259,9 @@ void blocked_binary_contraction() {
 
           if (!at::allclose(l_ten_out_mpi_merged, l_ten_out)) {
             std::cerr
-                << "error: einsum_ir_mpi solution is not close to einsum_ir !"
-                << std::endl;
+                << "error: einsum_ir_mpi solution is not close to einsum_ir!"
+                << std::endl
+                << "max error: " << (l_ten_out_mpi_merged - l_ten_out).abs().max().item<float>() << std::endl;
           }
         }
       } else {
@@ -338,8 +345,13 @@ void blocked_binary_contraction() {
 
         // split tensor
         auto l_ten_left_mpi_split = l_ten_left.chunk(2, 3);
-        auto l_ten_right_mpi_split = l_ten_right.detach().clone();
-        auto l_ten_out_mpi_split = l_ten_out.chunk(2, 4);
+        l_ten_left_mpi_split[0] = l_ten_left_mpi_split[0].contiguous();
+        l_ten_left_mpi_split[1] = l_ten_left_mpi_split[1].contiguous();
+        auto l_ten_right_mpi_split = l_ten_right.detach().clone().contiguous();
+        auto l_ten_out_mpi_split = at::zeros_like(l_ten_out).chunk(2, 4);
+        l_ten_out_mpi_split[0] = l_ten_out_mpi_split[0].contiguous();
+        l_ten_out_mpi_split[1] = l_ten_out_mpi_split[1].contiguous();
+
         // broadcast? async?
         // send tensor to other rank
         MPI_Send(l_ten_left_mpi_split[1].data_ptr(),
@@ -376,7 +388,8 @@ void blocked_binary_contraction() {
           if (!at::allclose(l_ten_out_mpi_merged, l_ten_out)) {
             std::cerr
                 << "error: einsum_ir_mpi solution is not close to einsum_ir!"
-                << std::endl;
+                << std::endl
+                << "max error: " << (l_ten_out_mpi_merged - l_ten_out).abs().max().item<float>() << std::endl;
           }
         }
       } else {
@@ -459,9 +472,13 @@ void blocked_binary_contraction() {
         l_tp0 = std::chrono::steady_clock::now();
 
         // split tensor
-        auto l_ten_left_mpi_split = l_ten_left.detach().clone();
+        auto l_ten_left_mpi_split = l_ten_left.detach().clone().contiguous();
         auto l_ten_right_mpi_split = l_ten_right.chunk(2, 3);
-        auto l_ten_out_mpi_split = l_ten_out.chunk(2, 3);
+        l_ten_right_mpi_split[0] = l_ten_right_mpi_split[0].contiguous();
+        l_ten_right_mpi_split[1] = l_ten_right_mpi_split[1].contiguous();
+        auto l_ten_out_mpi_split = at::zeros_like(l_ten_out).chunk(2, 3);
+        l_ten_out_mpi_split[0] = l_ten_out_mpi_split[0].contiguous();
+        l_ten_out_mpi_split[1] = l_ten_out_mpi_split[1].contiguous();
         // broadcast? async?
         // send tensor to other rank
         MPI_Send(l_ten_left_mpi_split.data_ptr(), l_ten_left_mpi_split.numel(),
@@ -497,7 +514,8 @@ void blocked_binary_contraction() {
           if (!at::allclose(l_ten_out_mpi_merged, l_ten_out)) {
             std::cerr
                 << "error: einsum_ir_mpi solution is not close to einsum_ir!"
-                << std::endl;
+                << std::endl
+                << "max error: " << (l_ten_out_mpi_merged - l_ten_out).abs().max().item<float>() << std::endl;
           }
         }
       } else {
@@ -581,8 +599,12 @@ void blocked_binary_contraction() {
 
         // split tensor
         std::vector<at::Tensor> l_ten_left_mpi_split = l_ten_left.chunk(2, 4);
+        l_ten_left_mpi_split[0] = l_ten_left_mpi_split[0].contiguous();
+        l_ten_left_mpi_split[1] = l_ten_left_mpi_split[1].contiguous();
         std::vector<at::Tensor> l_ten_right_mpi_split = l_ten_right.chunk(2, 4);
-        std::vector<at::Tensor> l_ten_out_mpi_split = {l_ten_out.detach().clone(), at::zeros_like(l_ten_out)};
+        l_ten_right_mpi_split[0] = l_ten_right_mpi_split[0].contiguous();
+        l_ten_right_mpi_split[1] = l_ten_right_mpi_split[1].contiguous();
+        at::Tensor l_ten_out_mpi_split = at::zeros_like(l_ten_out);
         // broadcast? async?
         // send tensor to other rank
         MPI_Send(l_ten_left_mpi_split[1].data_ptr(),
@@ -595,12 +617,11 @@ void blocked_binary_contraction() {
         // perform local computation
         l_bin_cont_mpi.contract(l_ten_left_mpi_split[0].data_ptr(),
                                 l_ten_right_mpi_split[0].data_ptr(),
-                                l_ten_out_mpi_split[0].data_ptr());
+                                l_ten_out_mpi_split.data_ptr());
 
-        MPI_Recv(l_ten_out_mpi_split[1].data_ptr(), l_ten_out_mpi_split[1].numel(),
-                 MPI_FLOAT, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-        auto l_ten_out_mpi_merged = at::add(l_ten_out_mpi_split[0], l_ten_out_mpi_split[1]);
+        MPI_Reduce(MPI_IN_PLACE, l_ten_out_mpi_split.data_ptr(),
+                   l_ten_out_mpi_split.numel(), MPI_FLOAT, MPI_SUM, 0,
+                   MPI_COMM_WORLD);
 
         l_tp1 = std::chrono::steady_clock::now();
         l_dur = std::chrono::duration_cast<std::chrono::duration<double>>(
@@ -614,11 +635,11 @@ void blocked_binary_contraction() {
           std::cout << "  gflops: " << l_gflops << std::endl;
           std::cout << "  Speedup: " << l_gflops / l_gflops_old << std::endl;
 
-          if (!at::allclose(l_ten_out_mpi_merged, l_ten_out)) {
+          if (!at::allclose(l_ten_out_mpi_split, l_ten_out)) {
             std::cerr
                 << "error: einsum_ir_mpi solution is not close to einsum_ir!"
                 << std::endl
-                << "max error: " << (l_ten_out_mpi_merged - l_ten_out).abs().max().item<float>() << std::endl;
+                << "max error: " << (l_ten_out_mpi_split - l_ten_out).abs().max().item<float>() << std::endl;
           }
         }
       } else {
@@ -663,8 +684,8 @@ void blocked_binary_contraction() {
                                 l_ten_right_mpi.data_ptr(),
                                 l_ten_out_mpi.data_ptr());
 
-        MPI_Send(l_ten_out_mpi.data_ptr(), l_ten_out_mpi.numel(), MPI_FLOAT, 0,
-                 0, MPI_COMM_WORLD);
+        MPI_Reduce(l_ten_out_mpi.data_ptr(), nullptr, l_ten_out_mpi.numel(),
+                   MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
       }
     }
   }
