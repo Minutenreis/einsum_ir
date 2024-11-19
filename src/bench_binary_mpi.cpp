@@ -89,6 +89,7 @@ void blocked_binary_contraction() {
   at::Tensor l_ten_left;
   at::Tensor l_ten_right;
   at::Tensor l_ten_out;
+  at::Tensor l_ten_out_mpi_c;
 
   if (rank == 0) {
     l_ten_left = at::rand({l_size_c, l_size_k, l_size_m});
@@ -157,16 +158,12 @@ void blocked_binary_contraction() {
     l_bin_cont.threading(l_num_tasks);
 #endif
 
-    at::Tensor l_ten_left_perm = l_ten_left;
-    at::Tensor l_ten_right_perm =
-        l_ten_right.permute({0, 1, 2, 3, 4, 6, 5, 7}).contiguous();
-
     // dry run
-    l_bin_cont.contract(l_ten_left_perm.data_ptr(), l_ten_right_perm.data_ptr(),
+    l_bin_cont.contract(l_ten_left.data_ptr(), l_ten_right.data_ptr(),
                         l_ten_out.data_ptr());
 
     l_tp0 = std::chrono::steady_clock::now();
-    l_bin_cont.contract(l_ten_left_perm.data_ptr(), l_ten_right_perm.data_ptr(),
+    l_bin_cont.contract(l_ten_left.data_ptr(), l_ten_right.data_ptr(),
                         l_ten_out.data_ptr());
     l_tp1 = std::chrono::steady_clock::now();
     l_dur = std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1 -
@@ -242,8 +239,7 @@ void blocked_binary_contraction() {
                  l_ten_out_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
                  MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-        auto l_ten_out_mpi_merged =
-            at::cat({l_ten_out_mpi_split[0], l_ten_out_mpi_split[1]}, 0).contiguous();
+        l_ten_out_mpi_c = at::cat({l_ten_out_mpi_split[0], l_ten_out_mpi_split[1]}, 0).contiguous();
 
         l_tp1 = std::chrono::steady_clock::now();
         l_dur = std::chrono::duration_cast<std::chrono::duration<double>>(
@@ -257,11 +253,11 @@ void blocked_binary_contraction() {
           std::cout << "  gflops: " << l_gflops << std::endl;
           std::cout << "  Speedup: " << l_gflops / l_gflops_old << std::endl;
 
-          if (!at::allclose(l_ten_out_mpi_merged, l_ten_out)) {
+          if (!at::allclose(l_ten_out_mpi_c, l_ten_out)) {
             std::cerr
                 << "error: einsum_ir_mpi solution is not close to einsum_ir!"
                 << std::endl
-                << "max error: " << (l_ten_out_mpi_merged - l_ten_out).abs().max().item<float>() << std::endl;
+                << "max error: " << (l_ten_out_mpi_c - l_ten_out).abs().max().item<float>() << std::endl;
           }
         }
       } else {
@@ -391,6 +387,12 @@ void blocked_binary_contraction() {
                 << std::endl
                 << "max error: " << (l_ten_out_mpi_merged - l_ten_out).abs().max().item<float>() << std::endl;
           }
+          if (!at::allclose(l_ten_out_mpi_merged, l_ten_out_mpi_c)) {
+            std::cerr
+                << "error: einsum_ir_mpi solution is not close to einsum_ir_mpi!"
+                << std::endl
+                << "max error: " << (l_ten_out_mpi_merged - l_ten_out_mpi_c).abs().max().item<float>() << std::endl;
+          }
         }
       } else {
         // todo: wie übertrage ich richtige größen? die braucht man auch schon
@@ -517,6 +519,12 @@ void blocked_binary_contraction() {
                 << std::endl
                 << "max error: " << (l_ten_out_mpi_merged - l_ten_out).abs().max().item<float>() << std::endl;
           }
+          if (!at::allclose(l_ten_out_mpi_merged, l_ten_out_mpi_c)) {
+            std::cerr
+                << "error: einsum_ir_mpi solution is not close to einsum_ir_mpi!"
+                << std::endl
+                << "max error: " << (l_ten_out_mpi_merged - l_ten_out_mpi_c).abs().max().item<float>() << std::endl;
+          }
         }
       } else {
         // todo: wie übertrage ich richtige größen? die braucht man auch schon
@@ -640,6 +648,12 @@ void blocked_binary_contraction() {
                 << "error: einsum_ir_mpi solution is not close to einsum_ir!"
                 << std::endl
                 << "max error: " << (l_ten_out_mpi_split - l_ten_out).abs().max().item<float>() << std::endl;
+          }
+          if (!at::allclose(l_ten_out_mpi_split, l_ten_out_mpi_c)) {
+            std::cerr
+                << "error: einsum_ir_mpi solution is not close to einsum_ir_mpi!"
+                << std::endl
+                << "max error: " << (l_ten_out_mpi_split - l_ten_out_mpi_c).abs().max().item<float>() << std::endl;
           }
         }
       } else {
