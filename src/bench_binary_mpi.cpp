@@ -43,10 +43,6 @@ void blocked_binary_contraction() {
   // M: 512
   // N: 128
   // K: 768
-  int64_t l_size_c = 256;
-  int64_t l_size_m = 512;
-  int64_t l_size_n = 128;
-  int64_t l_size_k = 768;
 
   int64_t l_size_c0 = 4;
   int64_t l_size_c1 = 8;
@@ -61,6 +57,11 @@ void blocked_binary_contraction() {
   int64_t l_size_k0 = 2;
   int64_t l_size_k1 = 16;
   int64_t l_size_k2 = 24;
+
+  int64_t l_size_c = l_size_c0 * l_size_c1 * l_size_c2;
+  int64_t l_size_m = l_size_m0 * l_size_m1;
+  int64_t l_size_n = l_size_n0 * l_size_n1;
+  int64_t l_size_k = l_size_k0 * l_size_k1 * l_size_k2;
 
   l_n_flops = l_size_c * l_size_m * l_size_n * l_size_k * 2;
 
@@ -202,6 +203,14 @@ void blocked_binary_contraction() {
                                                                       l_tp0);
     l_time_compile = l_dur.count();
 
+    // enable threading
+#ifdef _OPENMP
+    // four times overload
+    int64_t l_num_tasks = omp_get_max_threads() * 4;
+
+    l_bin_cont_mpi.threading(l_num_tasks);
+#endif
+
     // wait on all MPI processes
     for (int i = 0; i < 2; i++) {
       MPI_Barrier(MPI_COMM_WORLD);
@@ -331,6 +340,14 @@ void blocked_binary_contraction() {
                                                                       l_tp0);
     l_time_compile = l_dur.count();
 
+    // enable threading
+#ifdef _OPENMP
+    // four times overload
+    int64_t l_num_tasks = omp_get_max_threads() * 4;
+
+    l_bin_cont_mpi.threading(l_num_tasks);
+#endif
+
     // wait on all MPI processes
     for (int i = 0; i < 2; i++) {
       MPI_Barrier(MPI_COMM_WORLD);
@@ -459,6 +476,14 @@ void blocked_binary_contraction() {
                                                                       l_tp0);
     l_time_compile = l_dur.count();
 
+    // enable threading
+#ifdef _OPENMP
+    // four times overload
+    int64_t l_num_tasks = omp_get_max_threads() * 4;
+
+    l_bin_cont_mpi.threading(l_num_tasks);
+#endif
+
     // wait on all MPI processes
     for (int i = 0; i < 2; i++) {
       MPI_Barrier(MPI_COMM_WORLD);
@@ -584,6 +609,14 @@ void blocked_binary_contraction() {
     l_dur = std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1 -
                                                                       l_tp0);
     l_time_compile = l_dur.count();
+
+    // enable threading
+#ifdef _OPENMP
+    // four times overload
+    int64_t l_num_tasks = omp_get_max_threads() * 4;
+
+    l_bin_cont_mpi.threading(l_num_tasks);
+#endif
 
     // wait on all MPI processes
     for (int i = 0; i < 2; i++) {
