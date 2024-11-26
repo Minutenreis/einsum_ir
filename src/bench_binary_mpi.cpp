@@ -12,6 +12,8 @@
 
 void blocked_binary_contraction() {
 
+  int num_runs = 10;
+
   // Initialize MPI
   int world_size;
   MPI_Comm_size(MPI_COMM_WORLD, &world_size);
@@ -163,11 +165,13 @@ void blocked_binary_contraction() {
                         l_ten_out.data_ptr());
 
     l_tp0 = std::chrono::steady_clock::now();
-    l_bin_cont.contract(l_ten_left.data_ptr(), l_ten_right.data_ptr(),
-                        l_ten_out.data_ptr());
+    // measure multiple times
+    for (int i = 0; i < num_runs; i++) {
+      l_bin_cont.contract(l_ten_left.data_ptr(), l_ten_right.data_ptr(),
+                          l_ten_out.data_ptr());
+    }
     l_tp1 = std::chrono::steady_clock::now();
-    l_dur = std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1 -
-                                                                      l_tp0);
+    l_dur = std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1 - l_tp0) / 10;
     l_time = l_dur.count();
     l_gflops = 1.0E-9 * l_n_flops / l_time;
 
@@ -213,8 +217,11 @@ void blocked_binary_contraction() {
     l_bin_cont_mpi.threading(l_num_tasks);
 #endif
 
+    auto l_dur_communication = std::chrono::duration<double>::zero();
+    auto l_dur_contract = std::chrono::duration<double>::zero();
+
     // wait on all MPI processes
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 11; i++) {
       if (rank == 0) {
         l_tp0 = std::chrono::steady_clock::now();
 
@@ -243,38 +250,42 @@ void blocked_binary_contraction() {
                   MPI_COMM_WORLD, &l_req_recv);
         MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
 
-        auto l_tpMPI = std::chrono::steady_clock::now();
+        auto l_tpComm1End = std::chrono::steady_clock::now();
 
         // perform local computation
         l_bin_cont_mpi.contract(l_ten_left_mpi_split[0].data_ptr(),
                                 l_ten_right_mpi_split[0].data_ptr(),
                                 l_ten_out_mpi_split[0].data_ptr());
 
+        auto l_tpContractEnd = std::chrono::steady_clock::now();
+
         MPI_Wait(&l_req_recv, MPI_STATUS_IGNORE);
 
-        l_tp1 = std::chrono::steady_clock::now();
-        l_dur = std::chrono::duration_cast<std::chrono::duration<double>>(
-            l_tp1 - l_tp0);
-        auto l_dur_mpi = std::chrono::duration_cast<std::chrono::duration<double>>(
-            l_tpMPI - l_tp0);
-        auto l_dur_contract = std::chrono::duration_cast<std::chrono::duration<double>>(
-            l_tp1 - l_tpMPI);
-        l_time = l_dur.count();
         if (i > 0) {
-          l_gflops = 1.0E-9 * l_n_flops / l_time;
+          l_tp1 = std::chrono::steady_clock::now();
+          l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(
+              l_tpComm1End - l_tp0 + l_tp1 - l_tpContractEnd);
+          l_dur_contract += std::chrono::duration_cast<std::chrono::duration<double>>(
+              l_tpContractEnd - l_tpComm1End);
 
-          std::cout << "  time (compile): " << l_time_compile << std::endl;
-          std::cout << "  time (contract total): " << l_time << std::endl;
-          std::cout << "  time (contract only):" << l_dur_contract.count() << std::endl;
-          std::cout << "  time (communication): " << l_dur_mpi.count() << std::endl;
-          std::cout << "  gflops: " << l_gflops << std::endl;
-          std::cout << "  Speedup: " << l_gflops / l_gflops_old << std::endl;
+          if (i == 10) {
+            l_dur = l_dur_communication + l_dur_contract;
+            l_time = l_dur.count() / 10;
+            l_gflops = 1.0E-9 * l_n_flops / l_time;
 
-          if (!at::allclose(l_ten_out_mpi, l_ten_out)) {
-            std::cerr
-                << "error: einsum_ir_mpi solution is not close to einsum_ir!"
-                << std::endl
-                << "max error: " << (l_ten_out_mpi - l_ten_out).abs().max().item<float>() << std::endl;
+            std::cout << "  time (compile): " << l_time_compile << std::endl;
+            std::cout << "  time (contract total): " << l_time << std::endl;
+            std::cout << "  time (contract only):" << l_dur_contract.count() / 10 << std::endl;
+            std::cout << "  time (communication): " << l_dur_communication.count() / 10 << std::endl;
+            std::cout << "  gflops: " << l_gflops << std::endl;
+            std::cout << "  Speedup: " << l_gflops / l_gflops_old << std::endl;
+
+            if (!at::allclose(l_ten_out_mpi, l_ten_out)) {
+              std::cerr
+                  << "error: einsum_ir_mpi solution is not close to einsum_ir!"
+                  << std::endl
+                  << "max error: " << (l_ten_out_mpi - l_ten_out).abs().max().item<float>() << std::endl;
+            }
           }
         }
       } else {
