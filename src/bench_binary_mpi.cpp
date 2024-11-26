@@ -183,11 +183,13 @@ void blocked_binary_contraction() {
      * einsum_ir mpi c0 split
      */
     if (rank == 0) {
-      std::cout << "einsum_ir_mpi c0 split:" << std::endl;
+      std::cout << "einsum_ir_mpi split:" << std::endl;
     }
 
+    int chunks = 2;
+
     std::map<int64_t, int64_t> l_dim_sizes_mpi = l_dim_sizes;
-    l_dim_sizes_mpi[0] = l_size_c0 / 2;
+    l_dim_sizes_mpi[0] = l_size_c0 / chunks;
 
     einsum_ir::backend::BinaryContractionTpp l_bin_cont_mpi;
     l_bin_cont_mpi.init(
@@ -217,19 +219,18 @@ void blocked_binary_contraction() {
         l_tp0 = std::chrono::steady_clock::now();
 
         // split tensor
-        auto l_ten_left_mpi_split = l_ten_left.chunk(2, 0);
-        l_ten_left_mpi_split[0] = l_ten_left_mpi_split[0].contiguous();
-        l_ten_left_mpi_split[1] = l_ten_left_mpi_split[1].contiguous();
-        auto l_ten_right_mpi_split = l_ten_right.chunk(2, 0);
-        l_ten_right_mpi_split[0] = l_ten_right_mpi_split[0].contiguous();
-        l_ten_right_mpi_split[1] = l_ten_right_mpi_split[1].contiguous();
-        auto l_ten_out_mpi_split = at::zeros_like(l_ten_out).chunk(2, 0);
-        l_ten_out_mpi_split[0] = l_ten_out_mpi_split[0].contiguous();
-        l_ten_out_mpi_split[1] = l_ten_out_mpi_split[1].contiguous();
+        auto l_ten_left_mpi_split = l_ten_left.chunk(chunks, 0);
+        auto l_ten_right_mpi_split = l_ten_right.chunk(chunks, 0);
+        auto l_ten_out_mpi = at::zeros_like(l_ten_out);
+        auto l_ten_out_mpi_split = l_ten_out_mpi.chunk(chunks, 0);
 
         // broadcast? async?
         // send tensor to other rank
-        MPI_Request l_reqs[3];
+        MPI_Request l_reqs[2];
+        MPI_Request l_req_recv;
+
+        // todo: do Waitall in dedicated communication thread(s)
+        // todo: send smaller chunks to overlap communication and computation
 
         MPI_Isend(l_ten_left_mpi_split[1].data_ptr(),
                   l_ten_left_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
@@ -237,70 +238,74 @@ void blocked_binary_contraction() {
         MPI_Isend(l_ten_right_mpi_split[1].data_ptr(),
                   l_ten_right_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
                   MPI_COMM_WORLD, &l_reqs[1]);
+        MPI_Irecv(l_ten_out_mpi_split[1].data_ptr(),
+                  l_ten_out_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
+                  MPI_COMM_WORLD, &l_req_recv);
+        MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
+
+        auto l_tpMPI = std::chrono::steady_clock::now();
 
         // perform local computation
         l_bin_cont_mpi.contract(l_ten_left_mpi_split[0].data_ptr(),
                                 l_ten_right_mpi_split[0].data_ptr(),
                                 l_ten_out_mpi_split[0].data_ptr());
 
-        MPI_Irecv(l_ten_out_mpi_split[1].data_ptr(),
-                  l_ten_out_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
-                  MPI_COMM_WORLD, &l_reqs[2]);
-        MPI_Waitall(3, l_reqs, MPI_STATUSES_IGNORE);
-
-        auto l_ten_out_mpi_merged = at::cat({l_ten_out_mpi_split[0], l_ten_out_mpi_split[1]}, 0).contiguous();
+        MPI_Wait(&l_req_recv, MPI_STATUS_IGNORE);
 
         l_tp1 = std::chrono::steady_clock::now();
         l_dur = std::chrono::duration_cast<std::chrono::duration<double>>(
             l_tp1 - l_tp0);
+        auto l_dur_mpi = std::chrono::duration_cast<std::chrono::duration<double>>(
+            l_tpMPI - l_tp0);
+        auto l_dur_contract = std::chrono::duration_cast<std::chrono::duration<double>>(
+            l_tp1 - l_tpMPI);
         l_time = l_dur.count();
         if (i > 0) {
           l_gflops = 1.0E-9 * l_n_flops / l_time;
 
           std::cout << "  time (compile): " << l_time_compile << std::endl;
-          std::cout << "  time (contract): " << l_time << std::endl;
+          std::cout << "  time (contract total): " << l_time << std::endl;
+          std::cout << "  time (contract only):" << l_dur_contract.count() << std::endl;
+          std::cout << "  time (communication): " << l_dur_mpi.count() << std::endl;
           std::cout << "  gflops: " << l_gflops << std::endl;
           std::cout << "  Speedup: " << l_gflops / l_gflops_old << std::endl;
 
-          if (!at::allclose(l_ten_out_mpi_merged, l_ten_out)) {
+          if (!at::allclose(l_ten_out_mpi, l_ten_out)) {
             std::cerr
                 << "error: einsum_ir_mpi solution is not close to einsum_ir!"
                 << std::endl
-                << "max error: " << (l_ten_out_mpi_merged - l_ten_out).abs().max().item<float>() << std::endl;
+                << "max error: " << (l_ten_out_mpi - l_ten_out).abs().max().item<float>() << std::endl;
           }
         }
       } else {
-        // todo: wie übertrage ich richtige größen? die braucht man auch schon
-        // fürs compilen ...
-
         auto l_ten_left_mpi = at::zeros({
-            l_size_c0 / 2, // 0
-            l_size_c1,     // 1
-            l_size_c2,     // 2
-            l_size_m0,     // 6
-            l_size_k0,     // 3
-            l_size_k1,     // 4
-            l_size_k2,     // 5
-            l_size_m1      // 7
+            l_size_c0 / chunks, // 0
+            l_size_c1,          // 1
+            l_size_c2,          // 2
+            l_size_m0,          // 6
+            l_size_k0,          // 3
+            l_size_k1,          // 4
+            l_size_k2,          // 5
+            l_size_m1           // 7
         });
         auto l_ten_right_mpi = at::zeros({
-            l_size_c0 / 2, // 0
-            l_size_c1,     // 1
-            l_size_c2,     // 2
-            l_size_n0,     // 3
-            l_size_k0,     // 5
-            l_size_k1,     // 6
-            l_size_n1,     // 4
-            l_size_k2      // 7
+            l_size_c0 / chunks, // 0
+            l_size_c1,          // 1
+            l_size_c2,          // 2
+            l_size_n0,          // 3
+            l_size_k0,          // 5
+            l_size_k1,          // 6
+            l_size_n1,          // 4
+            l_size_k2           // 7
         });
         auto l_ten_out_mpi = at::zeros({
-            l_size_c0 / 2, // 0
-            l_size_c1,     // 1
-            l_size_c2,     // 2
-            l_size_n0,     // 5
-            l_size_m0,     // 3
-            l_size_n1,     // 6
-            l_size_m1      // 4
+            l_size_c0 / chunks, // 0
+            l_size_c1,          // 1
+            l_size_c2,          // 2
+            l_size_n0,          // 5
+            l_size_m0,          // 3
+            l_size_n1,          // 6
+            l_size_m1           // 4
         });
 
         MPI_Request l_reqs[2];
@@ -309,428 +314,13 @@ void blocked_binary_contraction() {
         MPI_Irecv(l_ten_right_mpi.data_ptr(), l_ten_right_mpi.numel(), MPI_FLOAT,
                   0, 0, MPI_COMM_WORLD, &l_reqs[1]);
         MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
-        l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
-                                l_ten_right_mpi.data_ptr(),
-                                l_ten_out_mpi.data_ptr());
-        MPI_Send(l_ten_out_mpi.data_ptr(), l_ten_out_mpi.numel(), MPI_FLOAT, 0,
-                 0, MPI_COMM_WORLD);
-      }
-    }
-  }
 
-  {
-    /*
-     * einsum_ir mpi m0 split
-     */
-    if (rank == 0) {
-      std::cout << "einsum_ir_mpi m0 split:" << std::endl;
-    }
-
-    std::map<int64_t, int64_t> l_dim_sizes_mpi = l_dim_sizes;
-    l_dim_sizes_mpi[3] = l_size_m0 / 2;
-
-    einsum_ir::backend::BinaryContractionTpp l_bin_cont_mpi;
-    l_bin_cont_mpi.init(
-        8, 8, 7, &l_dim_sizes_mpi, &l_dim_sizes_mpi, &l_dim_sizes_mpi, nullptr,
-        &l_dim_sizes_mpi, l_dim_ids_in_left, l_dim_ids_in_right, l_dim_ids_out,
-        einsum_ir::FP32, einsum_ir::FP32, einsum_ir::FP32, einsum_ir::FP32,
-        einsum_ir::ZERO, einsum_ir::MADD, einsum_ir::UNDEFINED_KTYPE);
-
-    l_tp0 = std::chrono::steady_clock::now();
-    l_bin_cont_mpi.compile();
-    l_tp1 = std::chrono::steady_clock::now();
-    l_dur = std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1 -
-                                                                      l_tp0);
-    l_time_compile = l_dur.count();
-
-    // enable threading
-#ifdef _OPENMP
-    // four times overload
-    int64_t l_num_tasks = omp_get_max_threads() * 4;
-
-    l_bin_cont_mpi.threading(l_num_tasks);
-#endif
-
-    // wait on all MPI processes
-    for (int i = 0; i < 2; i++) {
-
-      if (rank == 0) {
-        l_tp0 = std::chrono::steady_clock::now();
-
-        // split tensor
-        auto l_ten_left_mpi_split = l_ten_left.chunk(2, 3);
-        l_ten_left_mpi_split[0] = l_ten_left_mpi_split[0].contiguous();
-        l_ten_left_mpi_split[1] = l_ten_left_mpi_split[1].contiguous();
-        auto l_ten_right_mpi_split = l_ten_right.detach().clone().contiguous();
-        auto l_ten_out_mpi_split = at::zeros_like(l_ten_out).chunk(2, 4);
-        l_ten_out_mpi_split[0] = l_ten_out_mpi_split[0].contiguous();
-        l_ten_out_mpi_split[1] = l_ten_out_mpi_split[1].contiguous();
-
-        // broadcast? async?
-        // send tensor to other rank
-        MPI_Request l_reqs[3];
-
-        MPI_Isend(l_ten_left_mpi_split[1].data_ptr(),
-                  l_ten_left_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
-                  MPI_COMM_WORLD, &l_reqs[0]);
-        MPI_Isend(l_ten_right_mpi_split.data_ptr(),
-                  l_ten_right_mpi_split.numel(), MPI_FLOAT, 1, 0,
-                  MPI_COMM_WORLD, &l_reqs[1]);
-
-        // perform local computation
-        l_bin_cont_mpi.contract(l_ten_left_mpi_split[0].data_ptr(),
-                                l_ten_right_mpi_split.data_ptr(),
-                                l_ten_out_mpi_split[0].data_ptr());
-
-        MPI_Irecv(l_ten_out_mpi_split[1].data_ptr(),
-                  l_ten_out_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
-                  MPI_COMM_WORLD, &l_reqs[2]);
-        MPI_Waitall(3, l_reqs, MPI_STATUSES_IGNORE);
-
-        auto l_ten_out_mpi_merged =
-            at::cat({l_ten_out_mpi_split[0], l_ten_out_mpi_split[1]}, 4);
-
-        l_tp1 = std::chrono::steady_clock::now();
-        l_dur = std::chrono::duration_cast<std::chrono::duration<double>>(
-            l_tp1 - l_tp0);
-        l_time = l_dur.count();
-        if (i > 0) {
-          l_gflops = 1.0E-9 * l_n_flops / l_time;
-
-          std::cout << "  time (compile): " << l_time_compile << std::endl;
-          std::cout << "  time (contract): " << l_time << std::endl;
-          std::cout << "  gflops: " << l_gflops << std::endl;
-          std::cout << "  Speedup: " << l_gflops / l_gflops_old << std::endl;
-
-          if (!at::allclose(l_ten_out_mpi_merged, l_ten_out)) {
-            std::cerr
-                << "error: einsum_ir_mpi solution is not close to einsum_ir!"
-                << std::endl
-                << "max error: " << (l_ten_out_mpi_merged - l_ten_out).abs().max().item<float>() << std::endl;
-          }
-        }
-      } else {
-        // todo: wie übertrage ich richtige größen? die braucht man auch schon
-        // fürs compilen ...
-
-        auto l_ten_left_mpi = at::zeros({
-            l_size_c0,     // 0
-            l_size_c1,     // 1
-            l_size_c2,     // 2
-            l_size_m0 / 2, // 6
-            l_size_k0,     // 3
-            l_size_k1,     // 4
-            l_size_k2,     // 5
-            l_size_m1      // 7
-        });
-        auto l_ten_right_mpi = at::zeros({
-            l_size_c0, // 0
-            l_size_c1, // 1
-            l_size_c2, // 2
-            l_size_n0, // 3
-            l_size_k0, // 5
-            l_size_k1, // 6
-            l_size_n1, // 4
-            l_size_k2  // 7
-        });
-        auto l_ten_out_mpi = at::zeros({
-            l_size_c0,     // 0
-            l_size_c1,     // 1
-            l_size_c2,     // 2
-            l_size_n0,     // 5
-            l_size_m0 / 2, // 3
-            l_size_n1,     // 6
-            l_size_m1      // 4
-        });
-
-        MPI_Request l_reqs[2];
-        MPI_Irecv(l_ten_left_mpi.data_ptr(), l_ten_left_mpi.numel(), MPI_FLOAT,
-                  0, 0, MPI_COMM_WORLD, &l_reqs[0]);
-        MPI_Irecv(l_ten_right_mpi.data_ptr(), l_ten_right_mpi.numel(), MPI_FLOAT,
-                  0, 0, MPI_COMM_WORLD, &l_reqs[1]);
-        MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
         l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
                                 l_ten_right_mpi.data_ptr(),
                                 l_ten_out_mpi.data_ptr());
 
         MPI_Send(l_ten_out_mpi.data_ptr(), l_ten_out_mpi.numel(), MPI_FLOAT, 0,
                  0, MPI_COMM_WORLD);
-      }
-    }
-  }
-  {
-    /*
-     * einsum_ir mpi n0 split
-     */
-    if (rank == 0) {
-      std::cout << "einsum_ir_mpi n0 split:" << std::endl;
-    }
-
-    std::map<int64_t, int64_t> l_dim_sizes_mpi = l_dim_sizes;
-    l_dim_sizes_mpi[5] = l_size_n0 / 2;
-
-    einsum_ir::backend::BinaryContractionTpp l_bin_cont_mpi;
-    l_bin_cont_mpi.init(
-        8, 8, 7, &l_dim_sizes_mpi, &l_dim_sizes_mpi, &l_dim_sizes_mpi, nullptr,
-        &l_dim_sizes_mpi, l_dim_ids_in_left, l_dim_ids_in_right, l_dim_ids_out,
-        einsum_ir::FP32, einsum_ir::FP32, einsum_ir::FP32, einsum_ir::FP32,
-        einsum_ir::ZERO, einsum_ir::MADD, einsum_ir::UNDEFINED_KTYPE);
-
-    l_tp0 = std::chrono::steady_clock::now();
-    l_bin_cont_mpi.compile();
-    l_tp1 = std::chrono::steady_clock::now();
-    l_dur = std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1 -
-                                                                      l_tp0);
-    l_time_compile = l_dur.count();
-
-    // enable threading
-#ifdef _OPENMP
-    // four times overload
-    int64_t l_num_tasks = omp_get_max_threads() * 4;
-
-    l_bin_cont_mpi.threading(l_num_tasks);
-#endif
-
-    // wait on all MPI processes
-    for (int i = 0; i < 2; i++) {
-
-      if (rank == 0) {
-        l_tp0 = std::chrono::steady_clock::now();
-
-        // split tensor
-        auto l_ten_left_mpi_split = l_ten_left.detach().clone().contiguous();
-        auto l_ten_right_mpi_split = l_ten_right.chunk(2, 3);
-        l_ten_right_mpi_split[0] = l_ten_right_mpi_split[0].contiguous();
-        l_ten_right_mpi_split[1] = l_ten_right_mpi_split[1].contiguous();
-        auto l_ten_out_mpi_split = at::zeros_like(l_ten_out).chunk(2, 3);
-        l_ten_out_mpi_split[0] = l_ten_out_mpi_split[0].contiguous();
-        l_ten_out_mpi_split[1] = l_ten_out_mpi_split[1].contiguous();
-        // broadcast? async?
-        // send tensor to other rank
-        MPI_Request l_reqs[3];
-
-        MPI_Isend(l_ten_left_mpi_split.data_ptr(),
-                  l_ten_left_mpi_split.numel(), MPI_FLOAT, 1, 0,
-                  MPI_COMM_WORLD, &l_reqs[0]);
-        MPI_Isend(l_ten_right_mpi_split[1].data_ptr(),
-                  l_ten_right_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
-                  MPI_COMM_WORLD, &l_reqs[1]);
-
-        // perform local computation
-        l_bin_cont_mpi.contract(l_ten_left_mpi_split.data_ptr(),
-                                l_ten_right_mpi_split[0].data_ptr(),
-                                l_ten_out_mpi_split[0].data_ptr());
-
-        MPI_Irecv(l_ten_out_mpi_split[1].data_ptr(),
-                  l_ten_out_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
-                  MPI_COMM_WORLD, &l_reqs[2]);
-        MPI_Waitall(3, l_reqs, MPI_STATUSES_IGNORE);
-
-        auto l_ten_out_mpi_merged =
-            at::cat({l_ten_out_mpi_split[0], l_ten_out_mpi_split[1]}, 3);
-
-        l_tp1 = std::chrono::steady_clock::now();
-        l_dur = std::chrono::duration_cast<std::chrono::duration<double>>(
-            l_tp1 - l_tp0);
-        l_time = l_dur.count();
-        if (i > 0) {
-          l_gflops = 1.0E-9 * l_n_flops / l_time;
-
-          std::cout << "  time (compile): " << l_time_compile << std::endl;
-          std::cout << "  time (contract): " << l_time << std::endl;
-          std::cout << "  gflops: " << l_gflops << std::endl;
-          std::cout << "  Speedup: " << l_gflops / l_gflops_old << std::endl;
-
-          if (!at::allclose(l_ten_out_mpi_merged, l_ten_out)) {
-            std::cerr
-                << "error: einsum_ir_mpi solution is not close to einsum_ir!"
-                << std::endl
-                << "max error: " << (l_ten_out_mpi_merged - l_ten_out).abs().max().item<float>() << std::endl;
-          }
-        }
-      } else {
-        // todo: wie übertrage ich richtige größen? die braucht man auch schon
-        // fürs compilen ...
-
-        auto l_ten_left_mpi = at::zeros({
-            l_size_c0, // 0
-            l_size_c1, // 1
-            l_size_c2, // 2
-            l_size_m0, // 6
-            l_size_k0, // 3
-            l_size_k1, // 4
-            l_size_k2, // 5
-            l_size_m1  // 7
-        });
-        auto l_ten_right_mpi = at::zeros({
-            l_size_c0,     // 0
-            l_size_c1,     // 1
-            l_size_c2,     // 2
-            l_size_n0 / 2, // 3
-            l_size_k0,     // 5
-            l_size_k1,     // 6
-            l_size_n1,     // 4
-            l_size_k2      // 7
-        });
-        auto l_ten_out_mpi = at::zeros({
-            l_size_c0,     // 0
-            l_size_c1,     // 1
-            l_size_c2,     // 2
-            l_size_n0 / 2, // 5
-            l_size_m0,     // 3
-            l_size_n1,     // 6
-            l_size_m1      // 4
-        });
-
-        MPI_Request l_reqs[2];
-        MPI_Irecv(l_ten_left_mpi.data_ptr(), l_ten_left_mpi.numel(), MPI_FLOAT,
-                  0, 0, MPI_COMM_WORLD, &l_reqs[0]);
-        MPI_Irecv(l_ten_right_mpi.data_ptr(), l_ten_right_mpi.numel(), MPI_FLOAT,
-                  0, 0, MPI_COMM_WORLD, &l_reqs[1]);
-        MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
-        l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
-                                l_ten_right_mpi.data_ptr(),
-                                l_ten_out_mpi.data_ptr());
-
-        MPI_Send(l_ten_out_mpi.data_ptr(), l_ten_out_mpi.numel(), MPI_FLOAT, 0,
-                 0, MPI_COMM_WORLD);
-      }
-    }
-  }
-  {
-    /*
-     * einsum_ir mpi n0 split
-     */
-    if (rank == 0) {
-      std::cout << "einsum_ir_mpi k0 split:" << std::endl;
-    }
-
-    std::map<int64_t, int64_t> l_dim_sizes_mpi = l_dim_sizes;
-    l_dim_sizes_mpi[7] = l_size_k0 / 2;
-
-    einsum_ir::backend::BinaryContractionTpp l_bin_cont_mpi;
-    l_bin_cont_mpi.init(
-        8, 8, 7, &l_dim_sizes_mpi, &l_dim_sizes_mpi, &l_dim_sizes_mpi, nullptr,
-        &l_dim_sizes_mpi, l_dim_ids_in_left, l_dim_ids_in_right, l_dim_ids_out,
-        einsum_ir::FP32, einsum_ir::FP32, einsum_ir::FP32, einsum_ir::FP32,
-        einsum_ir::ZERO, einsum_ir::MADD, einsum_ir::UNDEFINED_KTYPE);
-
-    l_tp0 = std::chrono::steady_clock::now();
-    l_bin_cont_mpi.compile();
-    l_tp1 = std::chrono::steady_clock::now();
-    l_dur = std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1 -
-                                                                      l_tp0);
-    l_time_compile = l_dur.count();
-
-    // enable threading
-#ifdef _OPENMP
-    // four times overload
-    int64_t l_num_tasks = omp_get_max_threads() * 4;
-
-    l_bin_cont_mpi.threading(l_num_tasks);
-#endif
-
-    // wait on all MPI processes
-    for (int i = 0; i < 2; i++) {
-
-      if (rank == 0) {
-
-        // split tensor
-        std::vector<at::Tensor> l_ten_left_mpi_split = l_ten_left.chunk(2, 4);
-        l_ten_left_mpi_split[0] = l_ten_left_mpi_split[0].contiguous();
-        l_ten_left_mpi_split[1] = l_ten_left_mpi_split[1].contiguous();
-        std::vector<at::Tensor> l_ten_right_mpi_split = l_ten_right.chunk(2, 4);
-        l_ten_right_mpi_split[0] = l_ten_right_mpi_split[0].contiguous();
-        l_ten_right_mpi_split[1] = l_ten_right_mpi_split[1].contiguous();
-        at::Tensor l_ten_out_mpi_split = at::zeros_like(l_ten_out);
-        // broadcast? async?
-        // send tensor to other rank
-        l_tp0 = std::chrono::steady_clock::now();
-
-        MPI_Request l_reqs[2];
-
-        MPI_Isend(l_ten_left_mpi_split[1].data_ptr(),
-                  l_ten_left_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
-                  MPI_COMM_WORLD, &l_reqs[0]);
-        MPI_Isend(l_ten_right_mpi_split[1].data_ptr(),
-                  l_ten_right_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
-                  MPI_COMM_WORLD, &l_reqs[1]);
-
-        // perform local computation
-        l_bin_cont_mpi.contract(l_ten_left_mpi_split[0].data_ptr(),
-                                l_ten_right_mpi_split[0].data_ptr(),
-                                l_ten_out_mpi_split.data_ptr());
-
-        MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
-        MPI_Reduce(MPI_IN_PLACE, l_ten_out_mpi_split.data_ptr(),
-                   l_ten_out_mpi_split.numel(), MPI_FLOAT, MPI_SUM, 0,
-                   MPI_COMM_WORLD);
-
-        l_tp1 = std::chrono::steady_clock::now();
-        l_dur = std::chrono::duration_cast<std::chrono::duration<double>>(
-            l_tp1 - l_tp0);
-        l_time = l_dur.count();
-        if (i > 0) {
-          l_gflops = 1.0E-9 * l_n_flops / l_time;
-
-          std::cout << "  time (compile): " << l_time_compile << std::endl;
-          std::cout << "  time (contract): " << l_time << std::endl;
-          std::cout << "  gflops: " << l_gflops << std::endl;
-          std::cout << "  Speedup: " << l_gflops / l_gflops_old << std::endl;
-
-          if (!at::allclose(l_ten_out_mpi_split, l_ten_out)) {
-            std::cerr
-                << "error: einsum_ir_mpi solution is not close to einsum_ir!"
-                << std::endl
-                << "max error: " << (l_ten_out_mpi_split - l_ten_out).abs().max().item<float>() << std::endl;
-          }
-        }
-      } else {
-        // todo: wie übertrage ich richtige größen? die braucht man auch schon
-        // fürs compilen ...
-
-        auto l_ten_left_mpi = at::zeros({
-            l_size_c0,     // 0
-            l_size_c1,     // 1
-            l_size_c2,     // 2
-            l_size_m0,     // 6
-            l_size_k0 / 2, // 3
-            l_size_k1,     // 4
-            l_size_k2,     // 5
-            l_size_m1      // 7
-        });
-        auto l_ten_right_mpi = at::zeros({
-            l_size_c0,     // 0
-            l_size_c1,     // 1
-            l_size_c2,     // 2
-            l_size_n0,     // 3
-            l_size_k0 / 2, // 5
-            l_size_k1,     // 6
-            l_size_n1,     // 4
-            l_size_k2      // 7
-        });
-        auto l_ten_out_mpi = at::zeros({
-            l_size_c0, // 0
-            l_size_c1, // 1
-            l_size_c2, // 2
-            l_size_n0, // 5
-            l_size_m0, // 3
-            l_size_n1, // 6
-            l_size_m1  // 4
-        });
-
-        MPI_Request l_reqs[2];
-        MPI_Irecv(l_ten_left_mpi.data_ptr(), l_ten_left_mpi.numel(), MPI_FLOAT,
-                  0, 0, MPI_COMM_WORLD, &l_reqs[0]);
-        MPI_Irecv(l_ten_right_mpi.data_ptr(), l_ten_right_mpi.numel(), MPI_FLOAT,
-                  0, 0, MPI_COMM_WORLD, &l_reqs[1]);
-        MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
-        l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
-                                l_ten_right_mpi.data_ptr(),
-                                l_ten_out_mpi.data_ptr());
-
-        MPI_Reduce(l_ten_out_mpi.data_ptr(), nullptr, l_ten_out_mpi.numel(),
-                   MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
       }
     }
   }
