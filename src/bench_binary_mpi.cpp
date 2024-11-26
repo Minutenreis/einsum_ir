@@ -213,8 +213,6 @@ void blocked_binary_contraction() {
 
     // wait on all MPI processes
     for (int i = 0; i < 2; i++) {
-      MPI_Barrier(MPI_COMM_WORLD);
-
       if (rank == 0) {
         l_tp0 = std::chrono::steady_clock::now();
 
@@ -231,21 +229,24 @@ void blocked_binary_contraction() {
 
         // broadcast? async?
         // send tensor to other rank
-        MPI_Send(l_ten_left_mpi_split[1].data_ptr(),
-                 l_ten_left_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
-                 MPI_COMM_WORLD);
-        MPI_Send(l_ten_right_mpi_split[1].data_ptr(),
-                 l_ten_right_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
-                 MPI_COMM_WORLD);
+        MPI_Request l_reqs[3];
+
+        MPI_Isend(l_ten_left_mpi_split[1].data_ptr(),
+                  l_ten_left_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
+                  MPI_COMM_WORLD, &l_reqs[0]);
+        MPI_Isend(l_ten_right_mpi_split[1].data_ptr(),
+                  l_ten_right_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
+                  MPI_COMM_WORLD, &l_reqs[1]);
 
         // perform local computation
         l_bin_cont_mpi.contract(l_ten_left_mpi_split[0].data_ptr(),
                                 l_ten_right_mpi_split[0].data_ptr(),
                                 l_ten_out_mpi_split[0].data_ptr());
 
-        MPI_Recv(l_ten_out_mpi_split[1].data_ptr(),
-                 l_ten_out_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
-                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Irecv(l_ten_out_mpi_split[1].data_ptr(),
+                  l_ten_out_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
+                  MPI_COMM_WORLD, &l_reqs[2]);
+        MPI_Waitall(3, l_reqs, MPI_STATUSES_IGNORE);
 
         auto l_ten_out_mpi_merged = at::cat({l_ten_out_mpi_split[0], l_ten_out_mpi_split[1]}, 0).contiguous();
 
@@ -302,10 +303,12 @@ void blocked_binary_contraction() {
             l_size_m1      // 4
         });
 
-        MPI_Recv(l_ten_left_mpi.data_ptr(), l_ten_left_mpi.numel(), MPI_FLOAT,
-                 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(l_ten_right_mpi.data_ptr(), l_ten_right_mpi.numel(), MPI_FLOAT,
-                 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Request l_reqs[2];
+        MPI_Irecv(l_ten_left_mpi.data_ptr(), l_ten_left_mpi.numel(), MPI_FLOAT,
+                  0, 0, MPI_COMM_WORLD, &l_reqs[0]);
+        MPI_Irecv(l_ten_right_mpi.data_ptr(), l_ten_right_mpi.numel(), MPI_FLOAT,
+                  0, 0, MPI_COMM_WORLD, &l_reqs[1]);
+        MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
         l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
                                 l_ten_right_mpi.data_ptr(),
                                 l_ten_out_mpi.data_ptr());
@@ -350,7 +353,6 @@ void blocked_binary_contraction() {
 
     // wait on all MPI processes
     for (int i = 0; i < 2; i++) {
-      MPI_Barrier(MPI_COMM_WORLD);
 
       if (rank == 0) {
         l_tp0 = std::chrono::steady_clock::now();
@@ -366,21 +368,24 @@ void blocked_binary_contraction() {
 
         // broadcast? async?
         // send tensor to other rank
-        MPI_Send(l_ten_left_mpi_split[1].data_ptr(),
-                 l_ten_left_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
-                 MPI_COMM_WORLD);
-        MPI_Send(l_ten_right_mpi_split.data_ptr(),
-                 l_ten_right_mpi_split.numel(), MPI_FLOAT, 1, 0,
-                 MPI_COMM_WORLD);
+        MPI_Request l_reqs[3];
+
+        MPI_Isend(l_ten_left_mpi_split[1].data_ptr(),
+                  l_ten_left_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
+                  MPI_COMM_WORLD, &l_reqs[0]);
+        MPI_Isend(l_ten_right_mpi_split.data_ptr(),
+                  l_ten_right_mpi_split.numel(), MPI_FLOAT, 1, 0,
+                  MPI_COMM_WORLD, &l_reqs[1]);
 
         // perform local computation
         l_bin_cont_mpi.contract(l_ten_left_mpi_split[0].data_ptr(),
                                 l_ten_right_mpi_split.data_ptr(),
                                 l_ten_out_mpi_split[0].data_ptr());
 
-        MPI_Recv(l_ten_out_mpi_split[1].data_ptr(),
-                 l_ten_out_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
-                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Irecv(l_ten_out_mpi_split[1].data_ptr(),
+                  l_ten_out_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
+                  MPI_COMM_WORLD, &l_reqs[2]);
+        MPI_Waitall(3, l_reqs, MPI_STATUSES_IGNORE);
 
         auto l_ten_out_mpi_merged =
             at::cat({l_ten_out_mpi_split[0], l_ten_out_mpi_split[1]}, 4);
@@ -438,10 +443,12 @@ void blocked_binary_contraction() {
             l_size_m1      // 4
         });
 
-        MPI_Recv(l_ten_left_mpi.data_ptr(), l_ten_left_mpi.numel(), MPI_FLOAT,
-                 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(l_ten_right_mpi.data_ptr(), l_ten_right_mpi.numel(), MPI_FLOAT,
-                 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Request l_reqs[2];
+        MPI_Irecv(l_ten_left_mpi.data_ptr(), l_ten_left_mpi.numel(), MPI_FLOAT,
+                  0, 0, MPI_COMM_WORLD, &l_reqs[0]);
+        MPI_Irecv(l_ten_right_mpi.data_ptr(), l_ten_right_mpi.numel(), MPI_FLOAT,
+                  0, 0, MPI_COMM_WORLD, &l_reqs[1]);
+        MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
         l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
                                 l_ten_right_mpi.data_ptr(),
                                 l_ten_out_mpi.data_ptr());
@@ -486,7 +493,6 @@ void blocked_binary_contraction() {
 
     // wait on all MPI processes
     for (int i = 0; i < 2; i++) {
-      MPI_Barrier(MPI_COMM_WORLD);
 
       if (rank == 0) {
         l_tp0 = std::chrono::steady_clock::now();
@@ -501,20 +507,24 @@ void blocked_binary_contraction() {
         l_ten_out_mpi_split[1] = l_ten_out_mpi_split[1].contiguous();
         // broadcast? async?
         // send tensor to other rank
-        MPI_Send(l_ten_left_mpi_split.data_ptr(), l_ten_left_mpi_split.numel(),
-                 MPI_FLOAT, 1, 0, MPI_COMM_WORLD);
-        MPI_Send(l_ten_right_mpi_split[1].data_ptr(),
-                 l_ten_right_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
-                 MPI_COMM_WORLD);
+        MPI_Request l_reqs[3];
+
+        MPI_Isend(l_ten_left_mpi_split.data_ptr(),
+                  l_ten_left_mpi_split.numel(), MPI_FLOAT, 1, 0,
+                  MPI_COMM_WORLD, &l_reqs[0]);
+        MPI_Isend(l_ten_right_mpi_split[1].data_ptr(),
+                  l_ten_right_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
+                  MPI_COMM_WORLD, &l_reqs[1]);
 
         // perform local computation
         l_bin_cont_mpi.contract(l_ten_left_mpi_split.data_ptr(),
                                 l_ten_right_mpi_split[0].data_ptr(),
                                 l_ten_out_mpi_split[0].data_ptr());
 
-        MPI_Recv(l_ten_out_mpi_split[1].data_ptr(),
-                 l_ten_out_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
-                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Irecv(l_ten_out_mpi_split[1].data_ptr(),
+                  l_ten_out_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
+                  MPI_COMM_WORLD, &l_reqs[2]);
+        MPI_Waitall(3, l_reqs, MPI_STATUSES_IGNORE);
 
         auto l_ten_out_mpi_merged =
             at::cat({l_ten_out_mpi_split[0], l_ten_out_mpi_split[1]}, 3);
@@ -572,10 +582,12 @@ void blocked_binary_contraction() {
             l_size_m1      // 4
         });
 
-        MPI_Recv(l_ten_left_mpi.data_ptr(), l_ten_left_mpi.numel(), MPI_FLOAT,
-                 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(l_ten_right_mpi.data_ptr(), l_ten_right_mpi.numel(), MPI_FLOAT,
-                 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Request l_reqs[2];
+        MPI_Irecv(l_ten_left_mpi.data_ptr(), l_ten_left_mpi.numel(), MPI_FLOAT,
+                  0, 0, MPI_COMM_WORLD, &l_reqs[0]);
+        MPI_Irecv(l_ten_right_mpi.data_ptr(), l_ten_right_mpi.numel(), MPI_FLOAT,
+                  0, 0, MPI_COMM_WORLD, &l_reqs[1]);
+        MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
         l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
                                 l_ten_right_mpi.data_ptr(),
                                 l_ten_out_mpi.data_ptr());
@@ -620,10 +632,8 @@ void blocked_binary_contraction() {
 
     // wait on all MPI processes
     for (int i = 0; i < 2; i++) {
-      MPI_Barrier(MPI_COMM_WORLD);
 
       if (rank == 0) {
-        l_tp0 = std::chrono::steady_clock::now();
 
         // split tensor
         std::vector<at::Tensor> l_ten_left_mpi_split = l_ten_left.chunk(2, 4);
@@ -635,18 +645,23 @@ void blocked_binary_contraction() {
         at::Tensor l_ten_out_mpi_split = at::zeros_like(l_ten_out);
         // broadcast? async?
         // send tensor to other rank
-        MPI_Send(l_ten_left_mpi_split[1].data_ptr(),
-                 l_ten_left_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
-                 MPI_COMM_WORLD);
-        MPI_Send(l_ten_right_mpi_split[1].data_ptr(),
-                 l_ten_right_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
-                 MPI_COMM_WORLD);
+        l_tp0 = std::chrono::steady_clock::now();
+
+        MPI_Request l_reqs[2];
+
+        MPI_Isend(l_ten_left_mpi_split[1].data_ptr(),
+                  l_ten_left_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
+                  MPI_COMM_WORLD, &l_reqs[0]);
+        MPI_Isend(l_ten_right_mpi_split[1].data_ptr(),
+                  l_ten_right_mpi_split[1].numel(), MPI_FLOAT, 1, 0,
+                  MPI_COMM_WORLD, &l_reqs[1]);
 
         // perform local computation
         l_bin_cont_mpi.contract(l_ten_left_mpi_split[0].data_ptr(),
                                 l_ten_right_mpi_split[0].data_ptr(),
                                 l_ten_out_mpi_split.data_ptr());
 
+        MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
         MPI_Reduce(MPI_IN_PLACE, l_ten_out_mpi_split.data_ptr(),
                    l_ten_out_mpi_split.numel(), MPI_FLOAT, MPI_SUM, 0,
                    MPI_COMM_WORLD);
@@ -704,10 +719,12 @@ void blocked_binary_contraction() {
             l_size_m1  // 4
         });
 
-        MPI_Recv(l_ten_left_mpi.data_ptr(), l_ten_left_mpi.numel(), MPI_FLOAT,
-                 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(l_ten_right_mpi.data_ptr(), l_ten_right_mpi.numel(), MPI_FLOAT,
-                 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Request l_reqs[2];
+        MPI_Irecv(l_ten_left_mpi.data_ptr(), l_ten_left_mpi.numel(), MPI_FLOAT,
+                  0, 0, MPI_COMM_WORLD, &l_reqs[0]);
+        MPI_Irecv(l_ten_right_mpi.data_ptr(), l_ten_right_mpi.numel(), MPI_FLOAT,
+                  0, 0, MPI_COMM_WORLD, &l_reqs[1]);
+        MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
         l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
                                 l_ten_right_mpi.data_ptr(),
                                 l_ten_out_mpi.data_ptr());
@@ -720,7 +737,8 @@ void blocked_binary_contraction() {
 }
 
 int main() {
-  MPI_Init(NULL, NULL);
+  int provided;
+  MPI_Init_thread(NULL, NULL, MPI_THREAD_FUNNELED, &provided);
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
