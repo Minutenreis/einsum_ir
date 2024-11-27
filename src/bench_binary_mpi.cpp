@@ -336,19 +336,32 @@ void blocked_binary_contraction() {
             l_size_m1           // 4
         });
 
-        MPI_Request l_reqs[3];
+        // #pragma omp parallel num_threads(2)
+        {
 
-        for (int j = 0; j < chunks / 2; j++) {
+          MPI_Request l_reqs[3];
           MPI_Irecv(l_ten_left_mpi.data_ptr(), l_ten_left_mpi.numel(), MPI_FLOAT,
                     0, 0, MPI_COMM_WORLD, &l_reqs[0]);
           MPI_Irecv(l_ten_right_mpi.data_ptr(), l_ten_right_mpi.numel(), MPI_FLOAT,
                     0, 0, MPI_COMM_WORLD, &l_reqs[1]);
           MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
+          for (int j = 1; j < chunks / 2; j++) {
 
+            l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
+                                    l_ten_right_mpi.data_ptr(),
+                                    l_ten_out_mpi.data_ptr());
+
+            MPI_Isend(l_ten_out_mpi.data_ptr(), l_ten_out_mpi.numel(), MPI_FLOAT, 0,
+                      0, MPI_COMM_WORLD, &l_reqs[2]);
+            MPI_Irecv(l_ten_left_mpi.data_ptr(), l_ten_left_mpi.numel(), MPI_FLOAT,
+                      0, 0, MPI_COMM_WORLD, &l_reqs[0]);
+            MPI_Irecv(l_ten_right_mpi.data_ptr(), l_ten_right_mpi.numel(), MPI_FLOAT,
+                      0, 0, MPI_COMM_WORLD, &l_reqs[1]);
+            MPI_Waitall(3, l_reqs, MPI_STATUSES_IGNORE);
+          }
           l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
                                   l_ten_right_mpi.data_ptr(),
                                   l_ten_out_mpi.data_ptr());
-
           MPI_Send(l_ten_out_mpi.data_ptr(), l_ten_out_mpi.numel(), MPI_FLOAT, 0,
                    0, MPI_COMM_WORLD);
         }
