@@ -187,7 +187,7 @@ void blocked_binary_contraction() {
     }
 
     // has to be a factor of l_size_c0
-    const int chunks = 4;
+    const int chunks = 8;
 
     std::map<int64_t, int64_t> l_dim_sizes_mpi = l_dim_sizes;
     l_dim_sizes_mpi[0] = l_size_c0 / chunks;
@@ -336,25 +336,28 @@ void blocked_binary_contraction() {
                   0, 0, MPI_COMM_WORLD, &l_reqs[0][0]);
         MPI_Irecv(l_ten_right_mpi[0].data_ptr(), l_ten_right_mpi[0].numel(), MPI_FLOAT,
                   0, 0, MPI_COMM_WORLD, &l_reqs[0][1]);
+        MPI_Waitall(2, l_reqs[0], MPI_STATUSES_IGNORE);
 
 #pragma omp parallel num_threads(2)
         {
           for (int j = 1; j < chunks / 2; j++) {
             if (omp_get_thread_num() == 0) {
-              MPI_Waitall(2, l_reqs[(j - 1) % 2], MPI_STATUSES_IGNORE);
 
               l_bin_cont_mpi.contract(l_ten_left_mpi[(j - 1) % 2].data_ptr(),
                                       l_ten_right_mpi[(j - 1) % 2].data_ptr(),
                                       l_ten_out_mpi[(j - 1) % 2].data_ptr());
-              MPI_Send(l_ten_out_mpi[(j - 1) % 2].data_ptr(), l_ten_out_mpi[j - 1 % 2].numel(), MPI_FLOAT, 0,
-                       0, MPI_COMM_WORLD); // übernächstes senden
             } else {
 
               MPI_Irecv(l_ten_left_mpi[j % 2].data_ptr(), l_ten_left_mpi[j % 2].numel(), MPI_FLOAT,
                         0, 0, MPI_COMM_WORLD, &l_reqs[j % 2][0]);
               MPI_Irecv(l_ten_right_mpi[j % 2].data_ptr(), l_ten_right_mpi[j % 2].numel(), MPI_FLOAT,
                         0, 0, MPI_COMM_WORLD, &l_reqs[j % 2][1]);
-              MPI_Waitall(2, l_reqs[j % 2], MPI_STATUSES_IGNORE);
+              MPI_Waitall(3, l_reqs[j % 2], MPI_STATUSES_IGNORE);
+            }
+#pragma omp barrier
+            if (omp_get_thread_num() == 1) {
+              MPI_Isend(l_ten_out_mpi[(j - 1) % 2].data_ptr(), l_ten_out_mpi[j - 1 % 2].numel(), MPI_FLOAT, 0,
+                        0, MPI_COMM_WORLD, &l_reqs[(j + 1) % 2][2]);
             }
           }
         }
@@ -362,8 +365,9 @@ void blocked_binary_contraction() {
         l_bin_cont_mpi.contract(l_ten_left_mpi[(chunks / 2 - 1) % 2].data_ptr(),
                                 l_ten_right_mpi[(chunks / 2 - 1) % 2].data_ptr(),
                                 l_ten_out_mpi[(chunks / 2 - 1) % 2].data_ptr());
-        MPI_Send(l_ten_out_mpi[(chunks / 2 - 1) % 2].data_ptr(), l_ten_out_mpi[(chunks / 2 - 1) % 2].numel(), MPI_FLOAT, 0,
-                 0, MPI_COMM_WORLD);
+        MPI_Isend(l_ten_out_mpi[(chunks / 2 - 1) % 2].data_ptr(), l_ten_out_mpi[(chunks / 2 - 1) % 2].numel(), MPI_FLOAT, 0,
+                  0, MPI_COMM_WORLD, &l_reqs[(chunks / 2) % 2][1]);
+        MPI_Waitall(2, &l_reqs[(chunks / 2) % 2][1], MPI_STATUSES_IGNORE);
       }
     }
   }
