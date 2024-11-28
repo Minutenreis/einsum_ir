@@ -3,7 +3,7 @@
 
 #include <omp.h>
 
-#include "../../../../usr/lib/x86_64-linux-gnu/openmpi/include/mpi.h"
+#include <mpi.h>
 #include "backend/BinaryContractionTpp.h"
 #include "backend/EinsumNode.h"
 #include <ATen/ATen.h>
@@ -187,7 +187,7 @@ void blocked_binary_contraction() {
     }
 
     // has to be a factor of l_size_c0
-    const int chunks = 8;
+    const int chunks = 4;
 
     std::map<int64_t, int64_t> l_dim_sizes_mpi = l_dim_sizes;
     l_dim_sizes_mpi[0] = l_size_c0 / chunks;
@@ -290,12 +290,20 @@ void blocked_binary_contraction() {
             l_time = l_dur.count() / 10;
             l_gflops = 1.0E-9 * l_n_flops / l_time;
 
+            double l_times_r1[3] = {0.0, 0.0, 0.0};
+            MPI_Recv(l_times_r1, 3, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUSES_IGNORE);
+
             std::cout << "  num_chunks: " << chunks << std::endl;
             std::cout << "  time (compile): " << l_time_compile << std::endl;
+            std::cout << "  rank 0" << std::endl;
+            std::cout << "    time (contract): " << l_dur_contract.count() / 10 << std::endl;
+            std::cout << "    time (comm):     " << l_dur_communication.count() / 10 << std::endl;
+            std::cout << "    time (chunking): " << l_dur_chunking.count() / 10 << std::endl;
+            std::cout << "  rank 1" << std::endl;
+            std::cout << "    time (contract): " << l_times_r1[0] << std::endl;
+            std::cout << "    time (comm):     " << l_times_r1[1] << std::endl;
+            std::cout << "    time (chunking): " << l_times_r1[2] << std::endl;
             std::cout << "  time (contract total): " << l_time << std::endl;
-            std::cout << "  time (contract only):" << l_dur_contract.count() / 10 << std::endl;
-            std::cout << "  time (communication): " << l_dur_communication.count() / 10 << std::endl;
-            std::cout << "  time (chunking): " << l_dur_chunking.count() / 10 << std::endl;
             std::cout << "  gflops: " << l_gflops << std::endl;
             std::cout << "  Speedup: " << l_gflops / l_gflops_old << std::endl;
 
@@ -308,6 +316,7 @@ void blocked_binary_contraction() {
           }
         }
       } else {
+        l_tp0 = std::chrono::steady_clock::now();
         std::vector<at::Tensor> l_ten_left_mpi = {
             at::zeros({l_size_c / chunks,
                        l_size_k,
@@ -329,6 +338,9 @@ void blocked_binary_contraction() {
             at::zeros({l_size_c / chunks,
                        l_size_n,
                        l_size_m})};
+        auto l_tp0_contract = std::chrono::steady_clock::now();
+        if (i > 0)
+          l_dur_chunking += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp0_contract - l_tp0);
 
         MPI_Request l_reqs[2][3] = {{MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL},
                                     {MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL}};
@@ -337,37 +349,72 @@ void blocked_binary_contraction() {
         MPI_Irecv(l_ten_right_mpi[0].data_ptr(), l_ten_right_mpi[0].numel(), MPI_FLOAT,
                   0, 0, MPI_COMM_WORLD, &l_reqs[0][1]);
         MPI_Waitall(2, l_reqs[0], MPI_STATUSES_IGNORE);
+        auto l_tp1_contract = std::chrono::steady_clock::now();
+        if (i > 0)
+          l_dur_contract += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_contract - l_tp0_contract);
 
 #pragma omp parallel num_threads(2)
         {
           for (int j = 1; j < chunks / 2; j++) {
             if (omp_get_thread_num() == 0) {
+              
+              l_tp0_contract = std::chrono::steady_clock::now();
 
               l_bin_cont_mpi.contract(l_ten_left_mpi[(j - 1) % 2].data_ptr(),
                                       l_ten_right_mpi[(j - 1) % 2].data_ptr(),
                                       l_ten_out_mpi[(j - 1) % 2].data_ptr());
+              l_tp1_contract = std::chrono::steady_clock::now();
+        if (i > 0)
+          l_dur_contract += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_contract - l_tp0_contract);
             } else {
+
+              auto l_tp0_comm = std::chrono::steady_clock::now();
 
               MPI_Irecv(l_ten_left_mpi[j % 2].data_ptr(), l_ten_left_mpi[j % 2].numel(), MPI_FLOAT,
                         0, 0, MPI_COMM_WORLD, &l_reqs[j % 2][0]);
               MPI_Irecv(l_ten_right_mpi[j % 2].data_ptr(), l_ten_right_mpi[j % 2].numel(), MPI_FLOAT,
                         0, 0, MPI_COMM_WORLD, &l_reqs[j % 2][1]);
               MPI_Waitall(3, l_reqs[j % 2], MPI_STATUSES_IGNORE);
+
+              auto l_tp1_comm = std::chrono::steady_clock::now();
+              if (i > 0)
+                l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_comm - l_tp0_comm);
+
             }
 #pragma omp barrier
             if (omp_get_thread_num() == 1) {
+              auto l_tp0_comm = std::chrono::steady_clock::now();
+
               MPI_Isend(l_ten_out_mpi[(j - 1) % 2].data_ptr(), l_ten_out_mpi[j - 1 % 2].numel(), MPI_FLOAT, 0,
                         0, MPI_COMM_WORLD, &l_reqs[(j + 1) % 2][2]);
+                 auto l_tp1_comm = std::chrono::steady_clock::now();
+              if (i > 0)
+                l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_comm - l_tp0_comm);
             }
           }
         }
 
+        l_tp0_contract = std::chrono::steady_clock::now();
+
         l_bin_cont_mpi.contract(l_ten_left_mpi[(chunks / 2 - 1) % 2].data_ptr(),
                                 l_ten_right_mpi[(chunks / 2 - 1) % 2].data_ptr(),
                                 l_ten_out_mpi[(chunks / 2 - 1) % 2].data_ptr());
+
+        l_tp1_contract = std::chrono::steady_clock::now();
+        if (i > 0)
+          l_dur_contract += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_contract - l_tp0_contract);
+
+        auto l_tp0_comm = std::chrono::steady_clock::now();
         MPI_Isend(l_ten_out_mpi[(chunks / 2 - 1) % 2].data_ptr(), l_ten_out_mpi[(chunks / 2 - 1) % 2].numel(), MPI_FLOAT, 0,
                   0, MPI_COMM_WORLD, &l_reqs[(chunks / 2) % 2][1]);
         MPI_Waitall(2, &l_reqs[(chunks / 2) % 2][1], MPI_STATUSES_IGNORE);
+        auto l_tp1_comm = std::chrono::steady_clock::now();
+              if (i > 0)
+                l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_comm - l_tp0_comm);
+        if (i == 10) {
+            double l_times_r1[3] = { l_dur_contract.count() / 10, l_dur_communication.count() / 10, l_dur_chunking.count() / 10 };
+            MPI_Send(l_times_r1, 3, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+        }
       }
     }
   }
