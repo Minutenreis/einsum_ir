@@ -43,7 +43,7 @@ void blocked_binary_contraction() {
   // N: 128
   // K: 768
 
-  int64_t l_size_c0 = 16;
+  const int64_t l_size_c0 = 16;
   int64_t l_size_c1 = 8;
   int64_t l_size_c2 = 8;
 
@@ -187,7 +187,10 @@ void blocked_binary_contraction() {
     }
 
     // has to be a factor of l_size_c0
-    const int chunks = 4;
+    const int chunks = 16;
+    const int chunks_per_rank = chunks / 2;
+    static_assert(chunks % 2 == 0, "chunks has to be a factor of l_size_c0");
+    static_assert(l_size_c0 % chunks == 0, "l_size_c0 has to be a factor of chunks");
 
     std::map<int64_t, int64_t> l_dim_sizes_mpi = l_dim_sizes;
     l_dim_sizes_mpi[0] = l_size_c0 / chunks;
@@ -237,7 +240,7 @@ void blocked_binary_contraction() {
         {
           if (omp_get_thread_num() == 0) {
             auto l_tp0_contract = std::chrono::steady_clock::now();
-            for (int j = 0; j < chunks / 2; j++) {
+            for (int j = 0; j < chunks_per_rank; j++) {
 
               l_bin_cont_mpi.contract(l_ten_left_mpi_split[j].data_ptr(),
                                       l_ten_right_mpi_split[j].data_ptr(),
@@ -250,15 +253,15 @@ void blocked_binary_contraction() {
             auto l_tp0_communication = std::chrono::steady_clock::now();
 
             MPI_Request l_reqs[3];
-            MPI_Isend(l_ten_left_mpi_split[chunks / 2].data_ptr(),
-                      l_ten_left_mpi_split[chunks / 2].numel(), MPI_FLOAT, 1, 0,
+            MPI_Isend(l_ten_left_mpi_split[chunks_per_rank].data_ptr(),
+                      l_ten_left_mpi_split[chunks_per_rank].numel(), MPI_FLOAT, 1, 0,
                       MPI_COMM_WORLD, &l_reqs[0]);
-            MPI_Isend(l_ten_right_mpi_split[chunks / 2].data_ptr(),
-                      l_ten_right_mpi_split[chunks / 2].numel(), MPI_FLOAT, 1, 0,
+            MPI_Isend(l_ten_right_mpi_split[chunks_per_rank].data_ptr(),
+                      l_ten_right_mpi_split[chunks_per_rank].numel(), MPI_FLOAT, 1, 1,
                       MPI_COMM_WORLD, &l_reqs[1]);
             MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
 
-            for (int j = chunks / 2 + 1; j < chunks; j++) {
+            for (int j = chunks_per_rank + 1; j < chunks; j++) {
               MPI_Irecv(l_ten_out_mpi_split[j - 1].data_ptr(),
                         l_ten_out_mpi_split[j - 1].numel(), MPI_FLOAT, 1, 0,
                         MPI_COMM_WORLD, &l_reqs[2]);
@@ -317,101 +320,36 @@ void blocked_binary_contraction() {
           }
         }
       } else {
-        l_tp0 = std::chrono::steady_clock::now();
-        std::vector<at::Tensor> l_ten_left_mpi = {
+        at::Tensor l_ten_left_mpi =
             at::zeros({l_size_c / chunks,
                        l_size_k,
-                       l_size_m}),
-            at::zeros({l_size_c / chunks,
-                       l_size_k,
-                       l_size_m})};
-        std::vector<at::Tensor> l_ten_right_mpi = {
+                       l_size_m});
+        at::Tensor l_ten_right_mpi =
             at::zeros({l_size_c / chunks,
                        l_size_n,
-                       l_size_k}),
+                       l_size_k});
+        at::Tensor l_ten_out_mpi =
             at::zeros({l_size_c / chunks,
                        l_size_n,
-                       l_size_k})};
-        std::vector<at::Tensor> l_ten_out_mpi = {
-            at::zeros({l_size_c / chunks,
-                       l_size_n,
-                       l_size_m}),
-            at::zeros({l_size_c / chunks,
-                       l_size_n,
-                       l_size_m})};
-        auto l_tp0_contract = std::chrono::steady_clock::now();
-        if (i > 0)
-          l_dur_chunking += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp0_contract - l_tp0);
+                       l_size_m});
+        MPI_Request l_reqs[2];
 
-        MPI_Request l_reqs[2][3] = {{MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL},
-                                    {MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL}};
-        MPI_Irecv(l_ten_left_mpi[0].data_ptr(), l_ten_left_mpi[0].numel(), MPI_FLOAT,
-                  0, 0, MPI_COMM_WORLD, &l_reqs[0][0]);
-        MPI_Irecv(l_ten_right_mpi[0].data_ptr(), l_ten_right_mpi[0].numel(), MPI_FLOAT,
-                  0, 0, MPI_COMM_WORLD, &l_reqs[0][1]);
-        MPI_Waitall(2, l_reqs[0], MPI_STATUSES_IGNORE);
-        auto l_tp1_contract = std::chrono::steady_clock::now();
-        if (i > 0)
-          l_dur_contract += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_contract - l_tp0_contract);
+        for (int j = 0; j < chunks_per_rank; j++) {
+          MPI_Irecv(l_ten_left_mpi.data_ptr(),
+                    l_ten_left_mpi.numel(), MPI_FLOAT, 0, 0,
+                    MPI_COMM_WORLD, &l_reqs[0]);
+          MPI_Irecv(l_ten_right_mpi.data_ptr(),
+                    l_ten_right_mpi.numel(), MPI_FLOAT, 0, 1,
+                    MPI_COMM_WORLD, &l_reqs[1]);
+          MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
 
-#pragma omp parallel num_threads(2)
-        {
-          for (int j = 1; j < chunks / 2; j++) {
-            if (omp_get_thread_num() == 0) {
+          l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
+                                  l_ten_right_mpi.data_ptr(),
+                                  l_ten_out_mpi.data_ptr());
 
-              l_tp0_contract = std::chrono::steady_clock::now();
-
-              l_bin_cont_mpi.contract(l_ten_left_mpi[(j - 1) % 2].data_ptr(),
-                                      l_ten_right_mpi[(j - 1) % 2].data_ptr(),
-                                      l_ten_out_mpi[(j - 1) % 2].data_ptr());
-              l_tp1_contract = std::chrono::steady_clock::now();
-              if (i > 0)
-                l_dur_contract += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_contract - l_tp0_contract);
-            } else {
-
-              auto l_tp0_comm = std::chrono::steady_clock::now();
-
-              MPI_Irecv(l_ten_left_mpi[j % 2].data_ptr(), l_ten_left_mpi[j % 2].numel(), MPI_FLOAT,
-                        0, 0, MPI_COMM_WORLD, &l_reqs[j % 2][0]);
-              MPI_Irecv(l_ten_right_mpi[j % 2].data_ptr(), l_ten_right_mpi[j % 2].numel(), MPI_FLOAT,
-                        0, 0, MPI_COMM_WORLD, &l_reqs[j % 2][1]);
-              MPI_Waitall(3, l_reqs[j % 2], MPI_STATUSES_IGNORE);
-
-              auto l_tp1_comm = std::chrono::steady_clock::now();
-              if (i > 0)
-                l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_comm - l_tp0_comm);
-            }
-#pragma omp barrier
-            if (omp_get_thread_num() == 1) {
-              auto l_tp0_comm = std::chrono::steady_clock::now();
-
-              MPI_Isend(l_ten_out_mpi[(j - 1) % 2].data_ptr(), l_ten_out_mpi[j - 1 % 2].numel(), MPI_FLOAT, 0,
-                        0, MPI_COMM_WORLD, &l_reqs[(j + 1) % 2][2]);
-              auto l_tp1_comm = std::chrono::steady_clock::now();
-              if (i > 0)
-                l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_comm - l_tp0_comm);
-            }
-          }
-        }
-
-        l_tp0_contract = std::chrono::steady_clock::now();
-
-        l_bin_cont_mpi.contract(l_ten_left_mpi[(chunks / 2 - 1) % 2].data_ptr(),
-                                l_ten_right_mpi[(chunks / 2 - 1) % 2].data_ptr(),
-                                l_ten_out_mpi[(chunks / 2 - 1) % 2].data_ptr());
-
-        l_tp1_contract = std::chrono::steady_clock::now();
-        if (i > 0)
-          l_dur_contract += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_contract - l_tp0_contract);
-
-        auto l_tp0_comm = std::chrono::steady_clock::now();
-        MPI_Isend(l_ten_out_mpi[(chunks / 2 - 1) % 2].data_ptr(), l_ten_out_mpi[(chunks / 2 - 1) % 2].numel(), MPI_FLOAT, 0,
-                  0, MPI_COMM_WORLD, &l_reqs[(chunks / 2) % 2][1]);
-        MPI_Waitall(2, &l_reqs[(chunks / 2) % 2][1], MPI_STATUSES_IGNORE);
-        auto l_tp1_comm = std::chrono::steady_clock::now();
-        if (i > 0) {
-          l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_comm - l_tp0_comm);
-          l_dur += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_comm - l_tp0);
+          MPI_Send(l_ten_out_mpi.data_ptr(),
+                   l_ten_out_mpi.numel(), MPI_FLOAT, 0, 0,
+                   MPI_COMM_WORLD);
         }
         if (i == 10) {
           double l_times_r1[4] = {l_dur_contract.count() / 10, l_dur_communication.count() / 10, l_dur_chunking.count() / 10, l_dur.count() / 10};
