@@ -407,29 +407,40 @@ void blocked_binary_contraction() {
                 l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_comm - l_tp0_comm);
             }
           }
+
+          if (omp_get_thread_num() == 0) {
+            auto l_tp0_contract = std::chrono::steady_clock::now();
+
+            l_bin_cont_mpi.contract(l_ten_left_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
+                                    l_ten_right_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
+                                    l_ten_out_mpi[(chunks_per_rank - 1) % 2].data_ptr());
+
+            auto l_tp1_contract = std::chrono::steady_clock::now();
+            if (i > 0)
+              l_dur_contract += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_contract - l_tp0_contract);
+          } else {
+            l_tp0_comm = std::chrono::steady_clock::now();
+
+            MPI_Wait(&l_reqs[2], MPI_STATUS_IGNORE);
+
+            l_tp1_comm = std::chrono::steady_clock::now();
+            if (i > 0)
+              l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_comm - l_tp0_comm);
+          }
         }
 
-        auto l_tp0_contract = std::chrono::steady_clock::now();
+        l_tp0_comm = std::chrono::steady_clock::now();
 
-        l_bin_cont_mpi.contract(l_ten_left_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
-                                l_ten_right_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
-                                l_ten_out_mpi[(chunks_per_rank - 1) % 2].data_ptr());
-
-        auto l_tp1_contract = std::chrono::steady_clock::now();
-        if (i > 0)
-          l_dur_contract += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_contract - l_tp0_contract);
-
-        MPI_Isend(l_ten_out_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
-                  l_ten_out_mpi[(chunks_per_rank - 1) % 2].numel(), MPI_FLOAT, 0, 0,
-                  MPI_COMM_WORLD, &l_reqs[1]);
-
-        MPI_Waitall(2, &l_reqs[1], MPI_STATUSES_IGNORE);
+        MPI_Send(l_ten_out_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
+                 l_ten_out_mpi[(chunks_per_rank - 1) % 2].numel(), MPI_FLOAT, 0, 0,
+                 MPI_COMM_WORLD);
 
         l_tp1 = std::chrono::steady_clock::now();
         if (i > 0) {
-          l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1 - l_tp1_contract);
+          l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1 - l_tp0_comm);
           l_dur += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1 - l_tp0);
           if (i == 10) {
+            // send times to rank 0 for printing (otherwise std::cout can end up mangled)
             double l_times_r1[4] = {l_dur_contract.count() / 10, l_dur_communication.count() / 10, l_dur_dataPrep.count() / 10, l_dur.count() / 10};
             MPI_Send(l_times_r1, 4, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
           }
