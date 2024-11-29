@@ -187,13 +187,18 @@ void blocked_binary_contraction() {
     }
 
     // has to be a factor of l_size_c0
-    const int chunks = 8;
+    const int chunks = 16;
     const int chunks_per_rank = chunks / 2;
     static_assert(chunks % 2 == 0, "chunks has to be a factor of l_size_c0");
     static_assert(l_size_c0 % chunks == 0, "l_size_c0 has to be a factor of chunks");
 
     std::map<int64_t, int64_t> l_dim_sizes_mpi = l_dim_sizes;
-    l_dim_sizes_mpi[0] = l_size_c0 / chunks;
+
+    if (rank == 0) {
+      l_dim_sizes_mpi[0] = l_size_c0 / 2;
+    } else {
+      l_dim_sizes_mpi[0] = l_size_c0 / chunks;
+    }
 
     einsum_ir::backend::BinaryContractionTpp l_bin_cont_mpi;
     l_bin_cont_mpi.init(
@@ -241,12 +246,9 @@ void blocked_binary_contraction() {
         {
           if (omp_get_thread_num() == 0) {
             auto l_tp0_contract = std::chrono::steady_clock::now();
-            for (int j = 0; j < chunks_per_rank; j++) {
-
-              l_bin_cont_mpi.contract(l_ten_left_mpi_split[j].data_ptr(),
-                                      l_ten_right_mpi_split[j].data_ptr(),
-                                      l_ten_out_mpi_split[j].data_ptr());
-            }
+            l_bin_cont_mpi.contract(l_ten_left_mpi_split[0].data_ptr(),
+                                    l_ten_right_mpi_split[0].data_ptr(),
+                                    l_ten_out_mpi_split[0].data_ptr());
             auto l_tp1_contract = std::chrono::steady_clock::now();
             if (i > 0)
               l_dur_contract += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_contract - l_tp0_contract);
