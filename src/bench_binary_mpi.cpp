@@ -217,7 +217,7 @@ void blocked_binary_contraction() {
 
     auto l_dur_communication = std::chrono::duration<double>::zero();
     auto l_dur_contract = std::chrono::duration<double>::zero();
-    auto l_dur_chunking = std::chrono::duration<double>::zero();
+    auto l_dur_dataPrep = std::chrono::duration<double>::zero();
     l_dur = std::chrono::duration<double>::zero();
 
     // wait on all MPI processes
@@ -234,7 +234,7 @@ void blocked_binary_contraction() {
         // todo: do Waitall in dedicated communication thread(s)
         // todo: send smaller chunks to overlap communication and computation
         auto l_tp_chunkedSend = std::chrono::steady_clock::now();
-        l_dur_chunking += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp_chunkedSend - l_tp0);
+        l_dur_dataPrep += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp_chunkedSend - l_tp0);
 
 #pragma omp parallel num_threads(2)
         {
@@ -299,15 +299,15 @@ void blocked_binary_contraction() {
             std::cout << "  num_chunks: " << chunks << std::endl;
             std::cout << "  time (compile): " << l_time_compile << std::endl;
             std::cout << "  rank 0" << std::endl;
-            std::cout << "    time (contract): " << l_dur_contract.count() / 10 << std::endl;
-            std::cout << "    time (comm):     " << l_dur_communication.count() / 10 << std::endl;
-            std::cout << "    time (chunking): " << l_dur_chunking.count() / 10 << std::endl;
-            std::cout << "    time (total):    " << l_time << std::endl;
+            std::cout << "    time (data prep): " << l_dur_dataPrep.count() / 10 << std::endl;
+            std::cout << "    time (contract):  " << l_dur_contract.count() / 10 << std::endl;
+            std::cout << "    time (comm):      " << l_dur_communication.count() / 10 << std::endl;
+            std::cout << "    time (total):     " << l_time << std::endl;
             std::cout << "  rank 1" << std::endl;
-            std::cout << "    time (contract): " << l_times_r1[0] << std::endl;
-            std::cout << "    time (comm):     " << l_times_r1[1] << std::endl;
-            std::cout << "    time (chunking): " << l_times_r1[2] << std::endl;
-            std::cout << "    time (total):    " << l_times_r1[3] << std::endl;
+            std::cout << "    time (data prep): " << l_times_r1[2] << std::endl;
+            std::cout << "    time (contract):  " << l_times_r1[0] << std::endl;
+            std::cout << "    time (comm):      " << l_times_r1[1] << std::endl;
+            std::cout << "    time (total):     " << l_times_r1[3] << std::endl;
             std::cout << "  gflops: " << l_gflops << std::endl;
             std::cout << "  Speedup: " << l_gflops / l_gflops_old << std::endl;
 
@@ -320,6 +320,8 @@ void blocked_binary_contraction() {
           }
         }
       } else {
+        l_tp0 = std::chrono::steady_clock::now();
+
         std::array<at::Tensor, 2> l_ten_left_mpi = {at::zeros({l_size_c / chunks,
                                                                l_size_k,
                                                                l_size_m}),
@@ -339,6 +341,10 @@ void blocked_binary_contraction() {
                                                               l_size_n,
                                                               l_size_m})};
 
+        auto l_tp0_comm = std::chrono::steady_clock::now();
+        if (i > 0)
+          l_dur_dataPrep += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp0_comm - l_tp0);
+
         MPI_Request l_reqs[3] = {MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL};
         MPI_Irecv(l_ten_left_mpi[0].data_ptr(),
                   l_ten_left_mpi[0].numel(), MPI_FLOAT, 0, 0,
@@ -348,16 +354,27 @@ void blocked_binary_contraction() {
                   MPI_COMM_WORLD, &l_reqs[1]);
         MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
 
+        auto l_tp1_comm = std::chrono::steady_clock::now();
+        if (i > 0)
+          l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_comm - l_tp0_comm);
+
 #pragma omp parallel num_threads(2)
         {
           for (int j = 1; j < chunks_per_rank; j++) {
 
             if (omp_get_thread_num() == 0) {
+              auto l_tp0_contract = std::chrono::steady_clock::now();
 
               l_bin_cont_mpi.contract(l_ten_left_mpi[(j - 1) % 2].data_ptr(),
                                       l_ten_right_mpi[(j - 1) % 2].data_ptr(),
                                       l_ten_out_mpi[(j - 1) % 2].data_ptr());
+
+              auto l_tp1_contract = std::chrono::steady_clock::now();
+              if (i > 0)
+                l_dur_contract += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_contract - l_tp0_contract);
             } else {
+              l_tp0_comm = std::chrono::steady_clock::now();
+
               MPI_Irecv(l_ten_left_mpi[j % 2].data_ptr(),
                         l_ten_left_mpi[j % 2].numel(), MPI_FLOAT, 0, 0,
                         MPI_COMM_WORLD, &l_reqs[0]);
@@ -365,21 +382,37 @@ void blocked_binary_contraction() {
                         l_ten_right_mpi[j % 2].numel(), MPI_FLOAT, 0, 1,
                         MPI_COMM_WORLD, &l_reqs[1]);
               MPI_Waitall(3, l_reqs, MPI_STATUSES_IGNORE);
+
+              l_tp1_comm = std::chrono::steady_clock::now();
+              if (i > 0)
+                l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_comm - l_tp0_comm);
             }
 
 #pragma omp barrier
 
             if (omp_get_thread_num() != 0) {
+              l_tp0_comm = std::chrono::steady_clock::now();
+
               MPI_Isend(l_ten_out_mpi[(j - 1) % 2].data_ptr(),
                         l_ten_out_mpi[(j - 1) % 2].numel(), MPI_FLOAT, 0, 0,
                         MPI_COMM_WORLD, &l_reqs[2]);
+
+              l_tp1_comm = std::chrono::steady_clock::now();
+              if (i > 0)
+                l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_comm - l_tp0_comm);
             }
           }
         }
 
+        auto l_tp0_contract = std::chrono::steady_clock::now();
+
         l_bin_cont_mpi.contract(l_ten_left_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
                                 l_ten_right_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
                                 l_ten_out_mpi[(chunks_per_rank - 1) % 2].data_ptr());
+
+        auto l_tp1_contract = std::chrono::steady_clock::now();
+        if (i > 0)
+          l_dur_contract += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_contract - l_tp0_contract);
 
         MPI_Isend(l_ten_out_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
                   l_ten_out_mpi[(chunks_per_rank - 1) % 2].numel(), MPI_FLOAT, 0, 0,
@@ -387,9 +420,14 @@ void blocked_binary_contraction() {
 
         MPI_Waitall(2, &l_reqs[1], MPI_STATUSES_IGNORE);
 
-        if (i == 10) {
-          double l_times_r1[4] = {l_dur_contract.count() / 10, l_dur_communication.count() / 10, l_dur_chunking.count() / 10, l_dur.count() / 10};
-          MPI_Send(l_times_r1, 4, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+        l_tp1 = std::chrono::steady_clock::now();
+        if (i > 0) {
+          l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1 - l_tp1_contract);
+          l_dur += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1 - l_tp0);
+          if (i == 10) {
+            double l_times_r1[4] = {l_dur_contract.count() / 10, l_dur_communication.count() / 10, l_dur_dataPrep.count() / 10, l_dur.count() / 10};
+            MPI_Send(l_times_r1, 4, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+          }
         }
       }
     }
