@@ -246,9 +246,12 @@ void blocked_binary_contraction() {
         {
           if (omp_get_thread_num() == 0) {
             auto l_tp0_contract = std::chrono::steady_clock::now();
+
+            // on rank_0 the contraction doesn't have to be chunked
             l_bin_cont_mpi.contract(l_ten_left_mpi_split[0].data_ptr(),
                                     l_ten_right_mpi_split[0].data_ptr(),
                                     l_ten_out_mpi_split[0].data_ptr());
+
             auto l_tp1_contract = std::chrono::steady_clock::now();
             if (i > 0)
               l_dur_contract += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_contract - l_tp0_contract);
@@ -256,6 +259,7 @@ void blocked_binary_contraction() {
             auto l_tp0_communication = std::chrono::steady_clock::now();
 
             MPI_Request l_reqs[3];
+            // send initial chunk
             MPI_Isend(l_ten_left_mpi_split[chunks_per_rank].data_ptr(),
                       l_ten_left_mpi_split[chunks_per_rank].numel(), MPI_FLOAT, 1, 0,
                       MPI_COMM_WORLD, &l_reqs[0]);
@@ -265,10 +269,13 @@ void blocked_binary_contraction() {
             MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
 
             for (int j = chunks_per_rank + 1; j < chunks; j++) {
+
+              // receive output from last chunk
               MPI_Irecv(l_ten_out_mpi_split[j - 1].data_ptr(),
                         l_ten_out_mpi_split[j - 1].numel(), MPI_FLOAT, 1, 0,
                         MPI_COMM_WORLD, &l_reqs[2]);
 
+              // send chunk for contraction
               MPI_Isend(l_ten_left_mpi_split[j].data_ptr(),
                         l_ten_left_mpi_split[j].numel(), MPI_FLOAT, 1, 0,
                         MPI_COMM_WORLD, &l_reqs[0]);
@@ -278,6 +285,7 @@ void blocked_binary_contraction() {
               MPI_Waitall(3, l_reqs, MPI_STATUSES_IGNORE);
             }
 
+            // receive last chunk
             MPI_Recv(l_ten_out_mpi_split[chunks - 1].data_ptr(),
                      l_ten_out_mpi_split[chunks - 1].numel(), MPI_FLOAT, 1, 0,
                      MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -350,6 +358,7 @@ void blocked_binary_contraction() {
         if (i > 0)
           l_dur_dataPrep += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp0_comm - l_tp0);
 
+        // receive first chunk
         MPI_Request l_reqs[3] = {MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL};
         MPI_Irecv(l_ten_left_mpi[0].data_ptr(),
                   l_ten_left_mpi[0].numel(), MPI_FLOAT, 0, 0,
@@ -370,6 +379,7 @@ void blocked_binary_contraction() {
             if (omp_get_thread_num() == 0) {
               auto l_tp0_contract = std::chrono::steady_clock::now();
 
+              // this will spawn multiple openmp threads internally
               l_bin_cont_mpi.contract(l_ten_left_mpi[(j - 1) % 2].data_ptr(),
                                       l_ten_right_mpi[(j - 1) % 2].data_ptr(),
                                       l_ten_out_mpi[(j - 1) % 2].data_ptr());
@@ -380,6 +390,7 @@ void blocked_binary_contraction() {
             } else {
               l_tp0_comm = std::chrono::steady_clock::now();
 
+              // preload data for second contraction
               MPI_Irecv(l_ten_left_mpi[j % 2].data_ptr(),
                         l_ten_left_mpi[j % 2].numel(), MPI_FLOAT, 0, 0,
                         MPI_COMM_WORLD, &l_reqs[0]);
@@ -398,6 +409,7 @@ void blocked_binary_contraction() {
             if (omp_get_thread_num() != 0) {
               l_tp0_comm = std::chrono::steady_clock::now();
 
+              // queue send into next receive
               MPI_Isend(l_ten_out_mpi[(j - 1) % 2].data_ptr(),
                         l_ten_out_mpi[(j - 1) % 2].numel(), MPI_FLOAT, 0, 0,
                         MPI_COMM_WORLD, &l_reqs[2]);
@@ -411,6 +423,7 @@ void blocked_binary_contraction() {
           if (omp_get_thread_num() == 0) {
             auto l_tp0_contract = std::chrono::steady_clock::now();
 
+            // contract last chunk
             l_bin_cont_mpi.contract(l_ten_left_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
                                     l_ten_right_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
                                     l_ten_out_mpi[(chunks_per_rank - 1) % 2].data_ptr());
@@ -421,6 +434,7 @@ void blocked_binary_contraction() {
           } else {
             l_tp0_comm = std::chrono::steady_clock::now();
 
+            // send second to last chunk back
             MPI_Wait(&l_reqs[2], MPI_STATUS_IGNORE);
 
             l_tp1_comm = std::chrono::steady_clock::now();
@@ -431,6 +445,7 @@ void blocked_binary_contraction() {
 
         l_tp0_comm = std::chrono::steady_clock::now();
 
+        // send last chunk
         MPI_Send(l_ten_out_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
                  l_ten_out_mpi[(chunks_per_rank - 1) % 2].numel(), MPI_FLOAT, 0, 0,
                  MPI_COMM_WORLD);
