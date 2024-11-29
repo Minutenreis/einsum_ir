@@ -187,7 +187,7 @@ void blocked_binary_contraction() {
     }
 
     // has to be a factor of l_size_c0
-    const int chunks = 16;
+    const int chunks = 8;
     const int chunks_per_rank = chunks / 2;
     static_assert(chunks % 2 == 0, "chunks has to be a factor of l_size_c0");
     static_assert(l_size_c0 % chunks == 0, "l_size_c0 has to be a factor of chunks");
@@ -220,7 +220,10 @@ void blocked_binary_contraction() {
     auto l_dur_dataPrep = std::chrono::duration<double>::zero();
     l_dur = std::chrono::duration<double>::zero();
 
-    // wait on all MPI processes
+    // synchronize MPI processes for better time measurement
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // 1st run is warmup, next 10 for getting average times
     for (int i = 0; i < 11; i++) {
       if (rank == 0) {
         l_tp0 = std::chrono::steady_clock::now();
@@ -231,8 +234,6 @@ void blocked_binary_contraction() {
         auto l_ten_out_mpi = at::zeros_like(l_ten_out);
         auto l_ten_out_mpi_split = l_ten_out_mpi.chunk(chunks, 0);
 
-        // todo: do Waitall in dedicated communication thread(s)
-        // todo: send smaller chunks to overlap communication and computation
         auto l_tp_chunkedSend = std::chrono::steady_clock::now();
         l_dur_dataPrep += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp_chunkedSend - l_tp0);
 
@@ -303,11 +304,13 @@ void blocked_binary_contraction() {
             std::cout << "    time (contract):  " << l_dur_contract.count() / 10 << std::endl;
             std::cout << "    time (comm):      " << l_dur_communication.count() / 10 << std::endl;
             std::cout << "    time (total):     " << l_time << std::endl;
+            std::cout << "    time (control):   " << (l_dur_dataPrep.count() + std::max(l_dur_contract.count(), l_dur_communication.count())) / 10 << std::endl;
             std::cout << "  rank 1" << std::endl;
             std::cout << "    time (data prep): " << l_times_r1[2] << std::endl;
             std::cout << "    time (contract):  " << l_times_r1[0] << std::endl;
             std::cout << "    time (comm):      " << l_times_r1[1] << std::endl;
             std::cout << "    time (total):     " << l_times_r1[3] << std::endl;
+            std::cout << "    time (control):   " << l_times_r1[2] + std::max(l_times_r1[0], l_times_r1[1]) << std::endl;
             std::cout << "  gflops: " << l_gflops << std::endl;
             std::cout << "  Speedup: " << l_gflops / l_gflops_old << std::endl;
 
