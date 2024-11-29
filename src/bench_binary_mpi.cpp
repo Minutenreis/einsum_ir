@@ -270,7 +270,7 @@ void blocked_binary_contraction() {
                         l_ten_left_mpi_split[j].numel(), MPI_FLOAT, 1, 0,
                         MPI_COMM_WORLD, &l_reqs[0]);
               MPI_Isend(l_ten_right_mpi_split[j].data_ptr(),
-                        l_ten_right_mpi_split[j].numel(), MPI_FLOAT, 1, 0,
+                        l_ten_right_mpi_split[j].numel(), MPI_FLOAT, 1, 1,
                         MPI_COMM_WORLD, &l_reqs[1]);
               MPI_Waitall(3, l_reqs, MPI_STATUSES_IGNORE);
             }
