@@ -320,52 +320,72 @@ void blocked_binary_contraction() {
           }
         }
       } else {
-        at::Tensor l_ten_left_mpi =
-            at::zeros({l_size_c / chunks,
-                       l_size_k,
-                       l_size_m});
-        at::Tensor l_ten_right_mpi =
-            at::zeros({l_size_c / chunks,
-                       l_size_n,
-                       l_size_k});
-        at::Tensor l_ten_out_mpi =
-            at::zeros({l_size_c / chunks,
-                       l_size_n,
-                       l_size_m});
-        MPI_Request l_reqs[3];
-        MPI_Irecv(l_ten_left_mpi.data_ptr(),
-                  l_ten_left_mpi.numel(), MPI_FLOAT, 0, 0,
+        std::array<at::Tensor, 2> l_ten_left_mpi = {at::zeros({l_size_c / chunks,
+                                                               l_size_k,
+                                                               l_size_m}),
+                                                    at::zeros({l_size_c / chunks,
+                                                               l_size_k,
+                                                               l_size_m})};
+        std::array<at::Tensor, 2> l_ten_right_mpi = {at::zeros({l_size_c / chunks,
+                                                                l_size_n,
+                                                                l_size_k}),
+                                                     at::zeros({l_size_c / chunks,
+                                                                l_size_n,
+                                                                l_size_k})};
+        std::array<at::Tensor, 2> l_ten_out_mpi = {at::zeros({l_size_c / chunks,
+                                                              l_size_n,
+                                                              l_size_m}),
+                                                   at::zeros({l_size_c / chunks,
+                                                              l_size_n,
+                                                              l_size_m})};
+
+        MPI_Request l_reqs[3] = {MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL};
+        MPI_Irecv(l_ten_left_mpi[0].data_ptr(),
+                  l_ten_left_mpi[0].numel(), MPI_FLOAT, 0, 0,
                   MPI_COMM_WORLD, &l_reqs[0]);
-        MPI_Irecv(l_ten_right_mpi.data_ptr(),
-                  l_ten_right_mpi.numel(), MPI_FLOAT, 0, 1,
+        MPI_Irecv(l_ten_right_mpi[0].data_ptr(),
+                  l_ten_right_mpi[0].numel(), MPI_FLOAT, 0, 1,
                   MPI_COMM_WORLD, &l_reqs[1]);
         MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
 
-        for (int j = 1; j < chunks_per_rank; j++) {
+#pragma omp parallel num_threads(2)
+        {
+          for (int j = 1; j < chunks_per_rank; j++) {
 
-          l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
-                                  l_ten_right_mpi.data_ptr(),
-                                  l_ten_out_mpi.data_ptr());
+            if (omp_get_thread_num() == 0) {
 
-          MPI_Isend(l_ten_out_mpi.data_ptr(),
-                    l_ten_out_mpi.numel(), MPI_FLOAT, 0, 0,
-                    MPI_COMM_WORLD, &l_reqs[2]);
-          MPI_Irecv(l_ten_left_mpi.data_ptr(),
-                    l_ten_left_mpi.numel(), MPI_FLOAT, 0, 0,
-                    MPI_COMM_WORLD, &l_reqs[0]);
-          MPI_Irecv(l_ten_right_mpi.data_ptr(),
-                    l_ten_right_mpi.numel(), MPI_FLOAT, 0, 1,
-                    MPI_COMM_WORLD, &l_reqs[1]);
-          MPI_Waitall(3, l_reqs, MPI_STATUSES_IGNORE);
+              l_bin_cont_mpi.contract(l_ten_left_mpi[(j - 1) % 2].data_ptr(),
+                                      l_ten_right_mpi[(j - 1) % 2].data_ptr(),
+                                      l_ten_out_mpi[(j - 1) % 2].data_ptr());
+            } else {
+              MPI_Irecv(l_ten_left_mpi[j % 2].data_ptr(),
+                        l_ten_left_mpi[j % 2].numel(), MPI_FLOAT, 0, 0,
+                        MPI_COMM_WORLD, &l_reqs[0]);
+              MPI_Irecv(l_ten_right_mpi[j % 2].data_ptr(),
+                        l_ten_right_mpi[j % 2].numel(), MPI_FLOAT, 0, 1,
+                        MPI_COMM_WORLD, &l_reqs[1]);
+              MPI_Waitall(3, l_reqs, MPI_STATUSES_IGNORE);
+            }
+
+#pragma omp barrier
+
+            if (omp_get_thread_num() != 0) {
+              MPI_Isend(l_ten_out_mpi[(j - 1) % 2].data_ptr(),
+                        l_ten_out_mpi[(j - 1) % 2].numel(), MPI_FLOAT, 0, 0,
+                        MPI_COMM_WORLD, &l_reqs[2]);
+            }
+          }
         }
 
-        l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
-                                l_ten_right_mpi.data_ptr(),
-                                l_ten_out_mpi.data_ptr());
+        l_bin_cont_mpi.contract(l_ten_left_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
+                                l_ten_right_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
+                                l_ten_out_mpi[(chunks_per_rank - 1) % 2].data_ptr());
 
-        MPI_Send(l_ten_out_mpi.data_ptr(),
-                 l_ten_out_mpi.numel(), MPI_FLOAT, 0, 0,
-                 MPI_COMM_WORLD);
+        MPI_Isend(l_ten_out_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
+                  l_ten_out_mpi[(chunks_per_rank - 1) % 2].numel(), MPI_FLOAT, 0, 0,
+                  MPI_COMM_WORLD, &l_reqs[1]);
+
+        MPI_Waitall(2, &l_reqs[1], MPI_STATUSES_IGNORE);
 
         if (i == 10) {
           double l_times_r1[4] = {l_dur_contract.count() / 10, l_dur_communication.count() / 10, l_dur_chunking.count() / 10, l_dur.count() / 10};
