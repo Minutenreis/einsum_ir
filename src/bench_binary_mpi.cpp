@@ -332,25 +332,41 @@ void blocked_binary_contraction() {
             at::zeros({l_size_c / chunks,
                        l_size_n,
                        l_size_m});
-        MPI_Request l_reqs[2];
+        MPI_Request l_reqs[3];
+        MPI_Irecv(l_ten_left_mpi.data_ptr(),
+                  l_ten_left_mpi.numel(), MPI_FLOAT, 0, 0,
+                  MPI_COMM_WORLD, &l_reqs[0]);
+        MPI_Irecv(l_ten_right_mpi.data_ptr(),
+                  l_ten_right_mpi.numel(), MPI_FLOAT, 0, 1,
+                  MPI_COMM_WORLD, &l_reqs[1]);
+        MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
 
-        for (int j = 0; j < chunks_per_rank; j++) {
+        for (int j = 1; j < chunks_per_rank; j++) {
+
+          l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
+                                  l_ten_right_mpi.data_ptr(),
+                                  l_ten_out_mpi.data_ptr());
+
+          MPI_Isend(l_ten_out_mpi.data_ptr(),
+                    l_ten_out_mpi.numel(), MPI_FLOAT, 0, 0,
+                    MPI_COMM_WORLD, &l_reqs[2]);
           MPI_Irecv(l_ten_left_mpi.data_ptr(),
                     l_ten_left_mpi.numel(), MPI_FLOAT, 0, 0,
                     MPI_COMM_WORLD, &l_reqs[0]);
           MPI_Irecv(l_ten_right_mpi.data_ptr(),
                     l_ten_right_mpi.numel(), MPI_FLOAT, 0, 1,
                     MPI_COMM_WORLD, &l_reqs[1]);
-          MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
-
-          l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
-                                  l_ten_right_mpi.data_ptr(),
-                                  l_ten_out_mpi.data_ptr());
-
-          MPI_Send(l_ten_out_mpi.data_ptr(),
-                   l_ten_out_mpi.numel(), MPI_FLOAT, 0, 0,
-                   MPI_COMM_WORLD);
+          MPI_Waitall(3, l_reqs, MPI_STATUSES_IGNORE);
         }
+
+        l_bin_cont_mpi.contract(l_ten_left_mpi.data_ptr(),
+                                l_ten_right_mpi.data_ptr(),
+                                l_ten_out_mpi.data_ptr());
+
+        MPI_Send(l_ten_out_mpi.data_ptr(),
+                 l_ten_out_mpi.numel(), MPI_FLOAT, 0, 0,
+                 MPI_COMM_WORLD);
+
         if (i == 10) {
           double l_times_r1[4] = {l_dur_contract.count() / 10, l_dur_communication.count() / 10, l_dur_chunking.count() / 10, l_dur.count() / 10};
           MPI_Send(l_times_r1, 4, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
