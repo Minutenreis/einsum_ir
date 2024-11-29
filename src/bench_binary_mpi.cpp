@@ -44,27 +44,30 @@ void blocked_binary_contraction() {
   // K: 768
 
   const int64_t l_size_c0 = 16;
-  int64_t l_size_c1 = 8;
-  int64_t l_size_c2 = 8;
+  const int64_t l_size_c1 = 8;
+  const int64_t l_size_c2 = 8;
 
-  int64_t l_size_m0 = 8;
-  int64_t l_size_m1 = 64;
+  const int64_t l_size_m0 = 8;
+  const int64_t l_size_m1 = 64;
 
-  int64_t l_size_n0 = 16;
-  int64_t l_size_n1 = 8;
+  const int64_t l_size_n0 = 16;
+  const int64_t l_size_n1 = 8;
 
-  int64_t l_size_k0 = 2;
-  int64_t l_size_k1 = 16;
-  int64_t l_size_k2 = 24;
+  const int64_t l_size_k0 = 2;
+  const int64_t l_size_k1 = 16;
+  const int64_t l_size_k2 = 24;
 
-  int64_t l_size_c = l_size_c0 * l_size_c1 * l_size_c2;
-  int64_t l_size_m = l_size_m0 * l_size_m1;
-  int64_t l_size_n = l_size_n0 * l_size_n1;
-  int64_t l_size_k = l_size_k0 * l_size_k1 * l_size_k2;
+  const int64_t l_size_c = l_size_c0 * l_size_c1 * l_size_c2;
+  const int64_t l_size_m = l_size_m0 * l_size_m1;
+  const int64_t l_size_n = l_size_n0 * l_size_n1;
+  const int64_t l_size_k = l_size_k0 * l_size_k1 * l_size_k2;
 
-  int64_t l_size_total = l_size_c * l_size_m * l_size_n * l_size_k;
+  const int64_t l_size_total = l_size_c * l_size_m * l_size_n * l_size_k;
+  const int64_t l_size_left = l_size_c * l_size_m * l_size_k;
+  const int64_t l_size_right = l_size_c * l_size_n * l_size_k;
+  const int64_t l_size_out = l_size_c * l_size_n * l_size_m;
 
-  int64_t l_n_flops = l_size_total * 2;
+  const int64_t l_n_flops = l_size_total * 2;
 
   std::map<int64_t, int64_t> l_dim_sizes;
   l_dim_sizes.insert(std::pair<int64_t, int64_t>(0, l_size_c0)); // c0
@@ -188,9 +191,24 @@ void blocked_binary_contraction() {
 
     // has to be a factor of l_size_c0
     const int chunks = 16;
+    const int comm_threads = 2;
+
     const int chunks_per_rank = chunks / 2;
-    static_assert(chunks % 2 == 0, "chunks has to be a factor of l_size_c0");
-    static_assert(l_size_c0 % chunks == 0, "l_size_c0 has to be a factor of chunks");
+    static_assert(chunks % 2 == 0, "work has to be split between two ranks");
+    static_assert(l_size_c0 % chunks == 0, "chunks has to be a factor of l_size_c0");
+
+    // work partionable between communication threads
+    static_assert(l_size_left % (chunks * comm_threads) == 0, "l_size_left has to be a factor of chunks * comm_threads");
+    static_assert(l_size_right % (chunks * comm_threads) == 0, "l_size_right has to be a factor of chunks * comm_threads");
+    static_assert(l_size_out % (chunks * comm_threads) == 0, "l_size_out has to be a factor of chunks * comm_threads");
+
+    int64_t l_size_l_chunk = l_size_left / chunks;
+    int64_t l_size_r_chunk = l_size_right / chunks;
+    int64_t l_size_o_chunk = l_size_out / chunks;
+
+    int64_t l_size_l_chunk_comm = l_size_l_chunk / comm_threads;
+    int64_t l_size_r_chunk_comm = l_size_r_chunk / comm_threads;
+    int64_t l_size_o_chunk_comm = l_size_o_chunk / comm_threads;
 
     std::map<int64_t, int64_t> l_dim_sizes_mpi = l_dim_sizes;
 
@@ -240,9 +258,10 @@ void blocked_binary_contraction() {
         auto l_ten_out_mpi_split = l_ten_out_mpi.chunk(chunks, 0);
 
         auto l_tp_chunkedSend = std::chrono::steady_clock::now();
-        l_dur_dataPrep += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp_chunkedSend - l_tp0);
+        if (i > 0)
+          l_dur_dataPrep += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp_chunkedSend - l_tp0);
 
-#pragma omp parallel num_threads(2)
+#pragma omp parallel num_threads(1 + comm_threads)
         {
           if (omp_get_thread_num() == 0) {
             auto l_tp0_contract = std::chrono::steady_clock::now();
@@ -256,43 +275,47 @@ void blocked_binary_contraction() {
             if (i > 0)
               l_dur_contract += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_contract - l_tp0_contract);
           } else {
-            auto l_tp0_communication = std::chrono::steady_clock::now();
 
-            MPI_Request l_reqs[3];
+            auto thread = omp_get_thread_num() - 1; // -1 to get thread id starting from 0
+            auto tag0 = thread;
+            auto tag1 = thread + comm_threads;
+            int64_t offset_l = thread * l_size_l_chunk_comm;
+            int64_t offset_r = thread * l_size_r_chunk_comm;
+            int64_t offset_o = thread * l_size_o_chunk_comm;
+
+            MPI_Request l_reqs[3] = {MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL};
             // send initial chunk
-            MPI_Isend(l_ten_left_mpi_split[chunks_per_rank].data_ptr(),
-                      l_ten_left_mpi_split[chunks_per_rank].numel(), MPI_FLOAT, 1, 0,
+            MPI_Isend(reinterpret_cast<float *>(l_ten_left_mpi_split[chunks_per_rank].data_ptr()) + offset_l,
+                      l_size_l_chunk_comm, MPI_FLOAT, 1, tag0,
                       MPI_COMM_WORLD, &l_reqs[0]);
-            MPI_Isend(l_ten_right_mpi_split[chunks_per_rank].data_ptr(),
-                      l_ten_right_mpi_split[chunks_per_rank].numel(), MPI_FLOAT, 1, 1,
+            MPI_Isend(reinterpret_cast<float *>(l_ten_right_mpi_split[chunks_per_rank].data_ptr()) + offset_r,
+                      l_size_r_chunk_comm, MPI_FLOAT, 1, tag1,
                       MPI_COMM_WORLD, &l_reqs[1]);
             MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
 
             for (int j = chunks_per_rank + 1; j < chunks; j++) {
 
-              // receive output from last chunk
-              MPI_Irecv(l_ten_out_mpi_split[j - 1].data_ptr(),
-                        l_ten_out_mpi_split[j - 1].numel(), MPI_FLOAT, 1, 0,
-                        MPI_COMM_WORLD, &l_reqs[2]);
-
               // send chunk for contraction
-              MPI_Isend(l_ten_left_mpi_split[j].data_ptr(),
-                        l_ten_left_mpi_split[j].numel(), MPI_FLOAT, 1, 0,
+              MPI_Isend(reinterpret_cast<float *>(l_ten_left_mpi_split[j].data_ptr()) + offset_l,
+                        l_size_l_chunk_comm, MPI_FLOAT, 1, tag0,
                         MPI_COMM_WORLD, &l_reqs[0]);
-              MPI_Isend(l_ten_right_mpi_split[j].data_ptr(),
-                        l_ten_right_mpi_split[j].numel(), MPI_FLOAT, 1, 1,
+              MPI_Isend(reinterpret_cast<float *>(l_ten_right_mpi_split[j].data_ptr()) + offset_r,
+                        l_size_r_chunk_comm, MPI_FLOAT, 1, tag1,
                         MPI_COMM_WORLD, &l_reqs[1]);
               MPI_Waitall(3, l_reqs, MPI_STATUSES_IGNORE);
+
+              // receive output from last chunk
+              MPI_Irecv(reinterpret_cast<float *>(l_ten_out_mpi_split[j - 1].data_ptr()) + offset_o,
+                        l_size_o_chunk_comm, MPI_FLOAT, 1, tag0,
+                        MPI_COMM_WORLD, &l_reqs[2]);
             }
 
-            // receive last chunk
-            MPI_Recv(l_ten_out_mpi_split[chunks - 1].data_ptr(),
-                     l_ten_out_mpi_split[chunks - 1].numel(), MPI_FLOAT, 1, 0,
-                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Wait(&l_reqs[2], MPI_STATUS_IGNORE);
 
-            auto l_tp1_communication = std::chrono::steady_clock::now();
-            if (i > 0)
-              l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_communication - l_tp0_communication);
+            // receive last chunk
+            MPI_Recv(reinterpret_cast<float *>(l_ten_out_mpi_split[chunks - 1].data_ptr()) + offset_o,
+                     l_size_o_chunk, MPI_FLOAT, 1, tag0,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
           }
         }
 
@@ -354,28 +377,35 @@ void blocked_binary_contraction() {
                                                               l_size_n,
                                                               l_size_m})};
 
-        auto l_tp0_comm = std::chrono::steady_clock::now();
+        auto l_tp_dataPrep = std::chrono::steady_clock::now();
         if (i > 0)
-          l_dur_dataPrep += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp0_comm - l_tp0);
+          l_dur_dataPrep += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp_dataPrep - l_tp0);
 
-        // receive first chunk
-        MPI_Request l_reqs[3] = {MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL};
-        MPI_Irecv(l_ten_left_mpi[0].data_ptr(),
-                  l_ten_left_mpi[0].numel(), MPI_FLOAT, 0, 0,
-                  MPI_COMM_WORLD, &l_reqs[0]);
-        MPI_Irecv(l_ten_right_mpi[0].data_ptr(),
-                  l_ten_right_mpi[0].numel(), MPI_FLOAT, 0, 1,
-                  MPI_COMM_WORLD, &l_reqs[1]);
-        MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
-
-        auto l_tp1_comm = std::chrono::steady_clock::now();
-        if (i > 0)
-          l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_comm - l_tp0_comm);
-
-#pragma omp parallel num_threads(2)
+#pragma omp parallel num_threads(1 + comm_threads)
         {
-          for (int j = 1; j < chunks_per_rank; j++) {
+          auto thread = omp_get_thread_num() - 1; // -1 to get thread id starting from 0
+          auto tag0 = thread;
+          auto tag1 = thread + comm_threads;
+          int64_t offset_l = thread * l_size_l_chunk_comm;
+          int64_t offset_r = thread * l_size_r_chunk_comm;
+          int64_t offset_o = thread * l_size_o_chunk_comm;
 
+          MPI_Request l_reqs[3] = {MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL};
+
+          if (omp_get_thread_num() != 0) {
+            // receive first chunk
+            MPI_Irecv(reinterpret_cast<float *>(l_ten_left_mpi[0].data_ptr()) + offset_l,
+                      l_size_l_chunk_comm, MPI_FLOAT, 0, tag0,
+                      MPI_COMM_WORLD, &l_reqs[0]);
+            MPI_Irecv(reinterpret_cast<float *>(l_ten_right_mpi[0].data_ptr()) + offset_r,
+                      l_size_r_chunk_comm, MPI_FLOAT, 0, tag1,
+                      MPI_COMM_WORLD, &l_reqs[1]);
+            MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
+          }
+
+#pragma omp barrier
+
+          for (int j = 1; j < chunks_per_rank; j++) {
             if (omp_get_thread_num() == 0) {
               auto l_tp0_contract = std::chrono::steady_clock::now();
 
@@ -384,39 +414,25 @@ void blocked_binary_contraction() {
                                       l_ten_right_mpi[(j - 1) % 2].data_ptr(),
                                       l_ten_out_mpi[(j - 1) % 2].data_ptr());
 
-              auto l_tp1_contract = std::chrono::steady_clock::now();
-              if (i > 0)
-                l_dur_contract += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_contract - l_tp0_contract);
             } else {
-              l_tp0_comm = std::chrono::steady_clock::now();
-
               // preload data for second contraction
-              MPI_Irecv(l_ten_left_mpi[j % 2].data_ptr(),
-                        l_ten_left_mpi[j % 2].numel(), MPI_FLOAT, 0, 0,
+              MPI_Irecv(reinterpret_cast<float *>(l_ten_left_mpi[j % 2].data_ptr()) + offset_l,
+                        l_size_l_chunk_comm, MPI_FLOAT, 0, tag0,
                         MPI_COMM_WORLD, &l_reqs[0]);
-              MPI_Irecv(l_ten_right_mpi[j % 2].data_ptr(),
-                        l_ten_right_mpi[j % 2].numel(), MPI_FLOAT, 0, 1,
+              MPI_Irecv(reinterpret_cast<float *>(l_ten_right_mpi[j % 2].data_ptr()) + offset_r,
+                        l_size_r_chunk_comm, MPI_FLOAT, 0, tag1,
                         MPI_COMM_WORLD, &l_reqs[1]);
               MPI_Waitall(3, l_reqs, MPI_STATUSES_IGNORE);
-
-              l_tp1_comm = std::chrono::steady_clock::now();
-              if (i > 0)
-                l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_comm - l_tp0_comm);
             }
 
 #pragma omp barrier
 
             if (omp_get_thread_num() != 0) {
-              l_tp0_comm = std::chrono::steady_clock::now();
 
               // queue send into next receive
-              MPI_Isend(l_ten_out_mpi[(j - 1) % 2].data_ptr(),
-                        l_ten_out_mpi[(j - 1) % 2].numel(), MPI_FLOAT, 0, 0,
+              MPI_Isend(reinterpret_cast<float *>(l_ten_out_mpi[(j - 1) % 2].data_ptr()) + offset_o,
+                        l_size_o_chunk_comm, MPI_FLOAT, 0, tag0,
                         MPI_COMM_WORLD, &l_reqs[2]);
-
-              l_tp1_comm = std::chrono::steady_clock::now();
-              if (i > 0)
-                l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_comm - l_tp0_comm);
             }
           }
 
@@ -432,27 +448,22 @@ void blocked_binary_contraction() {
             if (i > 0)
               l_dur_contract += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_contract - l_tp0_contract);
           } else {
-            l_tp0_comm = std::chrono::steady_clock::now();
 
             // send second to last chunk back
             MPI_Wait(&l_reqs[2], MPI_STATUS_IGNORE);
+          }
 
-            l_tp1_comm = std::chrono::steady_clock::now();
-            if (i > 0)
-              l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_comm - l_tp0_comm);
+#pragma omp barrier
+
+          if (omp_get_thread_num() != 0) {
+            // send last chunk
+            MPI_Send(reinterpret_cast<float *>(l_ten_out_mpi[(chunks_per_rank - 1) % 2].data_ptr()) + offset_o,
+                     l_size_o_chunk_comm, MPI_FLOAT, 0, tag0,
+                     MPI_COMM_WORLD);
           }
         }
 
-        l_tp0_comm = std::chrono::steady_clock::now();
-
-        // send last chunk
-        MPI_Send(l_ten_out_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
-                 l_ten_out_mpi[(chunks_per_rank - 1) % 2].numel(), MPI_FLOAT, 0, 0,
-                 MPI_COMM_WORLD);
-
-        l_tp1 = std::chrono::steady_clock::now();
         if (i > 0) {
-          l_dur_communication += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1 - l_tp0_comm);
           l_dur += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1 - l_tp0);
           if (i == 10) {
             // send times to rank 0 for printing (otherwise std::cout can end up mangled)
@@ -467,7 +478,7 @@ void blocked_binary_contraction() {
 
 int main() {
   int provided;
-  MPI_Init_thread(NULL, NULL, MPI_THREAD_SERIALIZED, &provided);
+  MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &provided);
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
