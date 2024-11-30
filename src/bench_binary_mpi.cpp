@@ -249,12 +249,12 @@ void blocked_binary_contraction() {
     // 1st run is warmup, next 10 for getting average times
     for (int i = 0; i < 11; i++) {
       if (rank == 0) {
+        auto l_ten_out_mpi = at::zeros_like(l_ten_out);
         l_tp0 = std::chrono::steady_clock::now();
 
         // split tensor
         auto l_ten_left_mpi_split = l_ten_left.chunk(chunks, 0);
         auto l_ten_right_mpi_split = l_ten_right.chunk(chunks, 0);
-        auto l_ten_out_mpi = at::zeros_like(l_ten_out);
         auto l_ten_out_mpi_split = l_ten_out_mpi.chunk(chunks, 0);
 
         std::chrono::duration<double> l_dur_temp_comm = std::chrono::duration<double>::zero();
