@@ -44,20 +44,20 @@ void blocked_binary_contraction() {
   // K: 768
 
   const int64_t l_size_c0 = 16;
-  const int64_t l_size_c1 = 8;
-  const int64_t l_size_c2 = 8;
+  // const int64_t l_size_c1 = 1;
+  // const int64_t l_size_c2 = 1;
 
-  const int64_t l_size_m0 = 8;
+  const int64_t l_size_m0 = 256;
   const int64_t l_size_m1 = 64;
 
-  const int64_t l_size_n0 = 16;
-  const int64_t l_size_n1 = 8;
+  const int64_t l_size_n0 = 256;
+  const int64_t l_size_n1 = 16;
 
-  const int64_t l_size_k0 = 2;
+  const int64_t l_size_k0 = 8;
   const int64_t l_size_k1 = 16;
   const int64_t l_size_k2 = 24;
 
-  const int64_t l_size_c = l_size_c0 * l_size_c1 * l_size_c2;
+  const int64_t l_size_c = l_size_c0;
   const int64_t l_size_m = l_size_m0 * l_size_m1;
   const int64_t l_size_n = l_size_n0 * l_size_n1;
   const int64_t l_size_k = l_size_k0 * l_size_k1 * l_size_k2;
@@ -71,25 +71,25 @@ void blocked_binary_contraction() {
 
   std::map<int64_t, int64_t> l_dim_sizes;
   l_dim_sizes.insert(std::pair<int64_t, int64_t>(0, l_size_c0)); // c0
-  l_dim_sizes.insert(std::pair<int64_t, int64_t>(1, l_size_c1)); // c1
-  l_dim_sizes.insert(std::pair<int64_t, int64_t>(2, l_size_c2)); // c2
+  // l_dim_sizes.insert(std::pair<int64_t, int64_t>(1, l_size_c1)); // c1
+  // l_dim_sizes.insert(std::pair<int64_t, int64_t>(2, l_size_c2)); // c2
 
-  l_dim_sizes.insert(std::pair<int64_t, int64_t>(3, l_size_m0)); // m0
-  l_dim_sizes.insert(std::pair<int64_t, int64_t>(4, l_size_m1)); // m1
+  l_dim_sizes.insert(std::pair<int64_t, int64_t>(1, l_size_m0)); // m0
+  l_dim_sizes.insert(std::pair<int64_t, int64_t>(2, l_size_m1)); // m1
 
-  l_dim_sizes.insert(std::pair<int64_t, int64_t>(5, l_size_n0)); // n0
-  l_dim_sizes.insert(std::pair<int64_t, int64_t>(6, l_size_n1)); // n1
+  l_dim_sizes.insert(std::pair<int64_t, int64_t>(3, l_size_n0)); // n0
+  l_dim_sizes.insert(std::pair<int64_t, int64_t>(4, l_size_n1)); // n1
 
-  l_dim_sizes.insert(std::pair<int64_t, int64_t>(7, l_size_k0)); // k0
-  l_dim_sizes.insert(std::pair<int64_t, int64_t>(8, l_size_k1)); // k1
-  l_dim_sizes.insert(std::pair<int64_t, int64_t>(9, l_size_k2)); // k2
+  l_dim_sizes.insert(std::pair<int64_t, int64_t>(5, l_size_k0)); // k0
+  l_dim_sizes.insert(std::pair<int64_t, int64_t>(6, l_size_k1)); // k1
+  l_dim_sizes.insert(std::pair<int64_t, int64_t>(7, l_size_k2)); // k2
 
-  //                               c0 c1 c2 m0 k0 k1 k2 m1
-  int64_t l_dim_ids_in_left[8] = {0, 1, 2, 3, 7, 8, 9, 4};
-  //                               c0 c1 c2 n0 k0 k1 n1 k2
-  int64_t l_dim_ids_in_right[8] = {0, 1, 2, 5, 7, 8, 6, 9};
-  //                               c0 c1 c2 n0 m0 n1 m1
-  int64_t l_dim_ids_out[7] = {0, 1, 2, 5, 3, 6, 4};
+  //                              c0 m0 k0 k1 k2 m1
+  int64_t l_dim_ids_in_left[6] = {0, 1, 5, 6, 7, 2};
+  //                               c0 n0 k0 k1 n1 k2
+  int64_t l_dim_ids_in_right[6] = {0, 3, 5, 6, 4, 7};
+  //                          c0 n0 m0 n1 m1
+  int64_t l_dim_ids_out[5] = {0, 3, 1, 4, 2};
 
   at::Tensor l_ten_left;
   at::Tensor l_ten_right;
@@ -104,36 +104,30 @@ void blocked_binary_contraction() {
      * einsum data
      **/
     l_ten_left = l_ten_left.view({l_size_c0,   // 0
-                                  l_size_c1,   // 1
-                                  l_size_c2,   // 2
                                   l_size_k0,   // 3
                                   l_size_k1,   // 4
                                   l_size_k2,   // 5
                                   l_size_m0,   // 6
                                   l_size_m1}); // 7
-    //                                c0 c1 c2 m0 k0 k1 k2 m1
-    l_ten_left = l_ten_left.permute({0, 1, 2, 6, 3, 4, 5, 7}).contiguous();
+    //                               c0 m0 k0 k1 k2 m1
+    l_ten_left = l_ten_left.permute({0, 4, 1, 2, 3, 5}).contiguous();
 
     l_ten_right = l_ten_right.view({l_size_c0,   // 0
-                                    l_size_c1,   // 1
-                                    l_size_c2,   // 2
                                     l_size_n0,   // 3
                                     l_size_n1,   // 4
                                     l_size_k0,   // 5
                                     l_size_k1,   // 6
                                     l_size_k2}); // 7
-    //                                  c0 c1 c2 n0 k0 k1 n1 k2
-    l_ten_right = l_ten_right.permute({0, 1, 2, 3, 5, 6, 4, 7}).contiguous();
+    //                                 c0 n0 k0 k1 n1 k2
+    l_ten_right = l_ten_right.permute({0, 1, 3, 4, 2, 5}).contiguous();
 
     l_ten_out = l_ten_out.view({l_size_c0,   // 0
-                                l_size_c1,   // 1
-                                l_size_c2,   // 2
                                 l_size_m0,   // 3
                                 l_size_m1,   // 4
                                 l_size_n0,   // 5
                                 l_size_n1}); // 6
-    //                              c0 c1 c2 n0 m0 n1 m1
-    l_ten_out = l_ten_out.permute({0, 1, 2, 5, 3, 6, 4}).contiguous();
+    //                             c0 n0 m0 n1 m1
+    l_ten_out = l_ten_out.permute({0, 3, 1, 4, 2}).contiguous();
 
     /*
      * einsum_ir
@@ -141,7 +135,7 @@ void blocked_binary_contraction() {
     std::cout << "einsum_ir:" << std::endl;
 
     einsum_ir::backend::BinaryContractionTpp l_bin_cont;
-    l_bin_cont.init(8, 8, 7, &l_dim_sizes, &l_dim_sizes, &l_dim_sizes, nullptr,
+    l_bin_cont.init(6, 6, 5, &l_dim_sizes, &l_dim_sizes, &l_dim_sizes, nullptr,
                     &l_dim_sizes, l_dim_ids_in_left, l_dim_ids_in_right,
                     l_dim_ids_out, einsum_ir::FP32, einsum_ir::FP32,
                     einsum_ir::FP32, einsum_ir::FP32, einsum_ir::ZERO,
@@ -190,8 +184,8 @@ void blocked_binary_contraction() {
     }
 
     // has to be a factor of l_size_c0
-    const int chunks = 16;
-    const int comm_threads = 4;
+    const int chunks = l_size_c0;
+    const int comm_threads = 1;
 
     const int chunks_per_rank = chunks / 2;
     static_assert(chunks % 2 == 0, "work has to be split between two ranks");
@@ -220,7 +214,7 @@ void blocked_binary_contraction() {
 
     einsum_ir::backend::BinaryContractionTpp l_bin_cont_mpi;
     l_bin_cont_mpi.init(
-        8, 8, 7, &l_dim_sizes_mpi, &l_dim_sizes_mpi, &l_dim_sizes_mpi, nullptr,
+        6, 6, 5, &l_dim_sizes_mpi, &l_dim_sizes_mpi, &l_dim_sizes_mpi, nullptr,
         &l_dim_sizes_mpi, l_dim_ids_in_left, l_dim_ids_in_right, l_dim_ids_out,
         einsum_ir::FP32, einsum_ir::FP32, einsum_ir::FP32, einsum_ir::FP32,
         einsum_ir::ZERO, einsum_ir::MADD, einsum_ir::UNDEFINED_KTYPE);
