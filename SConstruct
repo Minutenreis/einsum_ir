@@ -172,6 +172,11 @@ if g_env['tblis'] != False:
     g_env.AppendUnique( LIBPATH = [ g_env['tblis'] + '/lib'] )
     g_env.AppendUnique( RPATH = [ g_env['tblis'] + '/lib'] )
 
+  # try to discover tci
+  g_env['tci'] = g_conf.CheckLibWithHeader( 'tci',
+                                            'tci.h',
+                                            'CXX' )
+
   # try to discover tblis
   g_env['tblis'] = g_conf.CheckLibWithHeader( 'tblis',
                                               'tblis/tblis.h',
@@ -203,7 +208,9 @@ if( g_env['libxsmm'] and g_env['libtorch'] ):
                  source = g_env.sources + g_env.exe['bench_expression'] )
   g_env.Program( g_env['build_dir']+'/bench_mlp',
                  source = g_env.sources + g_env.exe['bench_mlp'] )
-  
+  g_env.Program( g_env['build_dir']+'/bench_tree',
+                 source = g_env.sources + g_env.exe['bench_tree'] )
+
 g_env.Program( g_env['build_dir']+'/tests',
                source = g_env.tests )
 
