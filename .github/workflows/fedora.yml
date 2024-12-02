@@ -1,0 +1,162 @@
+name: Unit Tests and Benchmarks (Fedora)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: 0 0 * * *
+
+jobs:
+  tests:
+    runs-on: self-hosted
+    strategy:
+      matrix:
+        architecture: [x64, arm64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install System Packages
+        run: |
+          sudo dnf install -y util-linux-user
+          sudo dnf install -y which
+          sudo dnf install -y gfortran
+          sudo dnf install -y clang
+          sudo dnf install -y g++-13
+          sudo dnf install -y wget
+          sudo dnf install -y git
+          sudo dnf install -y cmake
+          sudo dnf install -y python3.10
+          sudo dnf install -y scons
+
+      - name: Install PyTorch
+        run: |
+          python3.10 -m venv venv_pytorch
+          source venv_pytorch/bin/activate
+          pip3 install torch==2.5.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          python -c "import torch; print(torch.__config__.show()); print(torch.__config__.parallel_info());"
+
+          # get Python version and create symlinks if needed
+          PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+          TORCH_LIBS_DIR="venv_pytorch/lib64/python${PYTHON_VERSION}/site-packages/torch.libs"
+          TORCH_LIB_DIR="venv_pytorch/lib64/python${PYTHON_VERSION}/site-packages/torch/lib"
+          if [ -d "$TORCH_LIBS_DIR" ]; then
+            mkdir -p "$TORCH_LIB_DIR"
+            ln -s $(pwd)/${TORCH_LIBS_DIR}/* ${TORCH_LIB_DIR}/
+          fi
+
+      - name: Install LIBXSMM
+        run: |
+          for i in {1..5}; do git clone https://github.com/libxsmm/libxsmm.git && break || { [ $i -eq 5 ] && exit 1 || sleep 15; }; done
+          cd libxsmm
+          git log | head -n 25
+          make BLAS=0 -j
+          cd ..
+
+      - name: Install OpenBLAS
+        run: |
+          wget https://github.com/OpenMathLib/OpenBLAS/archive/refs/tags/v0.3.28.tar.gz
+          tar -xvf v0.3.28.tar.gz
+          cd OpenBLAS-0.3.28
+          make -j
+          make PREFIX=$(pwd)/../openblas install
+          cd ..
+
+      - name: Install TBLIS
+        run: |
+          for i in {1..5}; do git clone https://github.com/devinamatthews/tblis.git tblis_src && break || { [ $i -eq 5 ] && exit 1 || sleep 15; }; done
+          cd tblis_src
+          git checkout 2cbdd21
+          git log | head -n 25
+          ./configure --prefix=$(pwd)/../tblis --enable-thread-model=openmp
+          sed -i '971d' Makefile
+          make -j
+          make install
+          cd ..
+          rm -rf tblis_src
+
+          for dir_type in indexed_dpd indexed dpd fwd
+          do
+          mkdir -p tblis/include/tblis/external/marray/marray/${dir_type}
+          mv tblis/include/tblis/external/marray/marray/*${dir_type}*.hpp tblis/include/tblis/external/marray/marray/${dir_type}
+          done
+
+          mkdir -p tblis/include/tblis/external/marray/marray/detail
+          mv tblis/include/tblis/external/marray/marray/utility* tblis/include/tblis/external/marray/marray/detail
+
+      - name: Install einsum_ir
+        run: |
+          git clone https://github.com/scalable-analyses/einsum_ir.git
+          cd einsum_ir
+          git log | head -n 25
+
+          wget https://github.com/catchorg/Catch2/releases/download/v2.13.10/catch.hpp
+
+          CXX=g++-13 CC=g++-13 scons libtorch=$(pwd)/../venv_pytorch/lib/python3.10/site-packages/torch blas=$(pwd)/../openblas tblis=$(pwd)/../tblis libxsmm=$(pwd)/../libxsmm -j8
+          mv build build_gcc
+
+          CXX=clang++ CC=clang scons libtorch=$(pwd)/../venv_pytorch/lib/python3.10/site-packages/torch blas=$(pwd)/../openblas tblis=$(pwd)/../tblis libxsmm=$(pwd)/../libxsmm -j8
+          mv build build_llvm
+          cd ..
+
+      - name: Run unit tests
+        run: |
+          cd einsum_ir
+          ./build_gcc/tests
+          ./build_llvm/tests
+
+      - name: Run unary tests
+        run: |
+          cd einsum_ir
+          ./build_gcc/bench_unary "abcde->abcde" "8,16,24,32,48" "FP32"
+          ./build_gcc/bench_unary "abcde->abced" "8,16,24,32,48" "FP32"
+          ./build_gcc/bench_unary "abcde->abecd" "8,16,24,32,48" "FP32"
+          ./build_gcc/bench_unary "abcde->aebcd" "8,16,24,32,48" "FP32"
+          ./build_gcc/bench_unary "abcde->eabcd" "8,16,24,32,48" "FP32"
+
+          ./build_gcc/bench_unary "abcde->badce" "8,16,24,32,48" "FP32"
+          ./build_gcc/bench_unary "abcde->dbeac" "8,16,24,32,48" "FP32"
+          ./build_gcc/bench_unary "abcde->cabed" "8,16,24,32,48" "FP32"
+
+          ./build_llvm/bench_unary "abcde->abcde" "8,16,24,32,48" "FP32"
+          ./build_llvm/bench_unary "abcde->abced" "8,16,24,32,48" "FP32"
+          ./build_llvm/bench_unary "abcde->abecd" "8,16,24,32,48" "FP32"
+          ./build_llvm/bench_unary "abcde->aebcd" "8,16,24,32,48" "FP32"
+          ./build_llvm/bench_unary "abcde->eabcd" "8,16,24,32,48" "FP32"
+
+          ./build_llvm/bench_unary "abcde->badce" "8,16,24,32,48" "FP32"
+          ./build_llvm/bench_unary "abcde->dbeac" "8,16,24,32,48" "FP32"
+          ./build_llvm/bench_unary "abcde->cabed" "8,16,24,32,48" "FP32"
+
+      - name: Run binary tests
+        run: |
+          cd einsum_ir
+          ./build_gcc/bench_binary "dfab,efca->edfcb" "24,32,48,32,32,256" FP32 "a,b,c,d,e,f"
+          ./build_gcc/bench_binary "dfab,efca->edfcb" "24,32,48,32,32,256" FP32 "a,b,c,d,f,e"
+          ./build_gcc/bench_binary "dfab,efca->edfcb" "24,32,48,32,32,256" FP32 "a,b,c,f,d,e"
+
+          ./build_llvm/bench_binary "dfab,efca->edfcb" "24,32,48,32,32,256" FP32 "a,b,c,d,e,f"
+          ./build_llvm/bench_binary "dfab,efca->edfcb" "24,32,48,32,32,256" FP32 "a,b,c,d,f,e"
+          ./build_llvm/bench_binary "dfab,efca->edfcb" "24,32,48,32,32,256" FP32 "a,b,c,f,d,e"
+
+      - name: Run expression benchmarks
+        run: |
+          bash einsum_ir/samples/tools/bench_einsum_ir.sh -e einsum_ir/build_gcc/bench_expression -l logs -r 1 -b tpp -d 1 -v
+          bash einsum_ir/samples/tools/bench_einsum_ir.sh -e einsum_ir/build_llvm/bench_expression -l logs -r 1 -b tpp -d 1 -v
+
+      - name: Run Einsum Tree Benchnarks
+        run: |
+          bash einsum_ir/samples/tools/bench_einsum_ir.sh -e einsum_ir/build_gcc/bench_tree -l logs -r 1 -b tpp -d 2 -v
+          bash einsum_ir/samples/tools/bench_einsum_ir.sh -e einsum_ir/build_llvm/bench_tree -l logs -r 1 -b tpp -d 2 -v
+
+      - name: Run MLP benchmark
+        run: |
+          cd einsum_ir
+          wget https://gist.github.com/breuera/06894bc6353d75d13f6369b420174e0e/raw/7eb509e411b5ec04d4e2295b51225bdd90bd7285/model_mlp.pt
+          ./build_gcc/bench_mlp model_mlp.pt 0
+          ./build_gcc/bench_mlp model_mlp.pt 1
+
+          ./build_llvm/bench_mlp model_mlp.pt 0
+          ./build_llvm/bench_mlp model_mlp.pt 1
