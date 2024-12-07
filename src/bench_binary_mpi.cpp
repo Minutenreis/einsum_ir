@@ -187,8 +187,8 @@ void blocked_binary_contraction() {
     const int chunks = l_size_c0;
     const int comm_threads = 1;
 
-    const int chunks_per_rank = chunks / 2;
-    static_assert(chunks % 2 == 0, "work has to be split between two ranks");
+    const int chunks_r0 = ceil(chunks / 2.0);
+    const int chunks_r1 = chunks - chunks_r0;
     static_assert(l_size_c0 % chunks == 0, "chunks has to be a factor of l_size_c0");
 
     // work partionable between communication threads
@@ -207,7 +207,7 @@ void blocked_binary_contraction() {
     std::map<int64_t, int64_t> l_dim_sizes_mpi = l_dim_sizes;
 
     if (rank == 0) {
-      l_dim_sizes_mpi[0] = l_size_c0 / 2;
+      l_dim_sizes_mpi[0] = l_size_c0 / chunks * chunks_r0;
     } else {
       l_dim_sizes_mpi[0] = l_size_c0 / chunks;
     }
@@ -283,15 +283,15 @@ void blocked_binary_contraction() {
 
             MPI_Request l_reqs[3] = {MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL};
             // send initial chunk
-            MPI_Isend(reinterpret_cast<float *>(l_ten_left_mpi_split[chunks_per_rank].data_ptr()) + offset_l,
+            MPI_Isend(reinterpret_cast<float *>(l_ten_left_mpi_split[chunks_r0].data_ptr()) + offset_l,
                       l_size_l_chunk_comm, MPI_FLOAT, 1, tag0,
                       MPI_COMM_WORLD, &l_reqs[0]);
-            MPI_Isend(reinterpret_cast<float *>(l_ten_right_mpi_split[chunks_per_rank].data_ptr()) + offset_r,
+            MPI_Isend(reinterpret_cast<float *>(l_ten_right_mpi_split[chunks_r0].data_ptr()) + offset_r,
                       l_size_r_chunk_comm, MPI_FLOAT, 1, tag1,
                       MPI_COMM_WORLD, &l_reqs[1]);
             MPI_Waitall(2, l_reqs, MPI_STATUSES_IGNORE);
 
-            for (int j = chunks_per_rank + 1; j < chunks; j++) {
+            for (int j = chunks_r0 + 1; j < chunks; j++) {
 
               // send chunk for contraction
               MPI_Isend(reinterpret_cast<float *>(l_ten_left_mpi_split[j].data_ptr()) + offset_l,
@@ -401,7 +401,7 @@ void blocked_binary_contraction() {
 
 #pragma omp barrier
 
-          for (int j = 1; j < chunks_per_rank; j++) {
+          for (int j = 1; j < chunks_r1; j++) {
             if (omp_get_thread_num() == 0) {
               auto l_tp0_contract = std::chrono::steady_clock::now();
 
@@ -447,9 +447,9 @@ void blocked_binary_contraction() {
             auto l_tp0_contract = std::chrono::steady_clock::now();
 
             // contract last chunk
-            l_bin_cont_mpi.contract(l_ten_left_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
-                                    l_ten_right_mpi[(chunks_per_rank - 1) % 2].data_ptr(),
-                                    l_ten_out_mpi[(chunks_per_rank - 1) % 2].data_ptr());
+            l_bin_cont_mpi.contract(l_ten_left_mpi[(chunks_r1 - 1) % 2].data_ptr(),
+                                    l_ten_right_mpi[(chunks_r1 - 1) % 2].data_ptr(),
+                                    l_ten_out_mpi[(chunks_r1 - 1) % 2].data_ptr());
 
             auto l_tp1_contract = std::chrono::steady_clock::now();
             l_dur_temp_contract += std::chrono::duration_cast<std::chrono::duration<double>>(l_tp1_contract - l_tp0_contract);
@@ -469,7 +469,7 @@ void blocked_binary_contraction() {
             auto l_tp0_comm = std::chrono::steady_clock::now();
 
             // send last chunk
-            MPI_Send(reinterpret_cast<float *>(l_ten_out_mpi[(chunks_per_rank - 1) % 2].data_ptr()) + offset_o,
+            MPI_Send(reinterpret_cast<float *>(l_ten_out_mpi[(chunks_r1 - 1) % 2].data_ptr()) + offset_o,
                      l_size_o_chunk_comm, MPI_FLOAT, 0, tag0,
                      MPI_COMM_WORLD);
 
