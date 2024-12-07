@@ -43,19 +43,19 @@ void blocked_binary_contraction() {
   // N: 128
   // K: 768
 
-  const int64_t l_size_c0 = 16;
+  const int64_t l_size_c0 = 8;
   // const int64_t l_size_c1 = 1;
   // const int64_t l_size_c2 = 1;
 
-  const int64_t l_size_m0 = 256;
-  const int64_t l_size_m1 = 64;
+  const int64_t l_size_m0 = 84;
+  const int64_t l_size_m1 = 96;
 
-  const int64_t l_size_n0 = 256;
-  const int64_t l_size_n1 = 16;
+  const int64_t l_size_n0 = 84;
+  const int64_t l_size_n1 = 96;
 
-  const int64_t l_size_k0 = 8;
-  const int64_t l_size_k1 = 16;
-  const int64_t l_size_k2 = 24;
+  const int64_t l_size_k0 = 2;
+  const int64_t l_size_k1 = 84;
+  const int64_t l_size_k2 = 84;
 
   const int64_t l_size_c = l_size_c0;
   const int64_t l_size_m = l_size_m0 * l_size_m1;

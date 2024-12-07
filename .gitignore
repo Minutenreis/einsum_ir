@@ -7,3 +7,4 @@ config.log
 .sconf_temp
 .vscode
 /samples/einsum_benchmark/instances
+logs
