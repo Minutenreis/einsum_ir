@@ -217,3 +217,5 @@ g_env.Program( g_env['build_dir']+'/tests',
 g_env["CXX"] = "/usr/bin/mpicxx"
 g_env.Program( g_env['build_dir']+'/bench_binary_mpi',
                  source = g_env.sources + g_env.exe['bench_binary_mpi'] )
+g_env.Program( g_env['build_dir']+'/bench_tree_mpi',
+                  source = g_env.sources + g_env.exe['bench_tree_mpi'] )
