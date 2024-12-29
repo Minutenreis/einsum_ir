@@ -17,12 +17,6 @@ struct Tensor {
   std::vector<int64_t> dim_ids; // ids of the tensor dimensions
   int64_t size;                 // in #elements
   datatype *data;               // pointer to data
-  Tensor(int64_t size, std::vector<int64_t> dim_ids) : size(size), dim_ids(dim_ids) {
-    data = new datatype[size];
-  }
-  ~Tensor() {
-    delete[] data;
-  }
 };
 
 /**
@@ -230,11 +224,169 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
   bin_cont.contract(left.data, getOffset(right.data, rank, num_ranks, chunk_size_right, num_ranks * 2 - 1), calc_buffer);
 }
 
-main(int argc, char *argv[]) {
+void benchmark() {
+  const int64_t l_size_c0 = 8;
+
+  const int64_t l_size_m0 = 84;
+  const int64_t l_size_m1 = 96;
+
+  const int64_t l_size_n0 = 84;
+  const int64_t l_size_n1 = 96;
+
+  const int64_t l_size_k0 = 2;
+  const int64_t l_size_k1 = 84;
+  const int64_t l_size_k2 = 84;
+
+  const int64_t l_size_c = l_size_c0;
+  const int64_t l_size_m = l_size_m0 * l_size_m1;
+  const int64_t l_size_n = l_size_n0 * l_size_n1;
+  const int64_t l_size_k = l_size_k0 * l_size_k1 * l_size_k2;
+
+  const int64_t l_size_total = l_size_c * l_size_m * l_size_n * l_size_k;
+  const int64_t l_size_left = l_size_c * l_size_m * l_size_k;
+  const int64_t l_size_right = l_size_c * l_size_n * l_size_k;
+  const int64_t l_size_out = l_size_c * l_size_n * l_size_m;
+
+  const int64_t l_n_flops = l_size_total * 2;
+
+  std::map<int64_t, int64_t> l_dim_sizes;
+  l_dim_sizes.insert(std::pair<int64_t, int64_t>(0, l_size_c0)); // c0
+
+  l_dim_sizes.insert(std::pair<int64_t, int64_t>(1, l_size_m0)); // m0
+  l_dim_sizes.insert(std::pair<int64_t, int64_t>(2, l_size_m1)); // m1
+
+  l_dim_sizes.insert(std::pair<int64_t, int64_t>(3, l_size_n0)); // n0
+  l_dim_sizes.insert(std::pair<int64_t, int64_t>(4, l_size_n1)); // n1
+
+  l_dim_sizes.insert(std::pair<int64_t, int64_t>(5, l_size_k0)); // k0
+  l_dim_sizes.insert(std::pair<int64_t, int64_t>(6, l_size_k1)); // k1
+  l_dim_sizes.insert(std::pair<int64_t, int64_t>(7, l_size_k2)); // k2
+
+  //                              c0 m0 k0 k1 k2 m1
+  int64_t l_dim_ids_in_left[6] = {0, 1, 5, 6, 7, 2};
+  //                               c0 n0 k0 k1 n1 k2
+  int64_t l_dim_ids_in_right[6] = {0, 3, 5, 6, 4, 7};
+  //                          c0 n0 m0 n1 m1
+  int64_t l_dim_ids_out[5] = {0, 3, 1, 4, 2};
+
+  at::Tensor l_ten_left;
+  at::Tensor l_ten_right;
+  at::Tensor l_ten_out;
+  at::Tensor l_ten_out2;
+
+  Tensor left;
+  Tensor right;
+  Tensor out;
+  Tensor out2;
+
+  int rank = 0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+  int num_ranks;
+  MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
+
+  if (rank == 0) {
+    std::cout << "einsum_ir:" << std::endl;
+
+    l_ten_left = at::rand({l_size_c, l_size_k, l_size_m});
+    l_ten_right = at::rand({l_size_c, l_size_n, l_size_k});
+    l_ten_out = at::zeros({l_size_c, l_size_n, l_size_m});
+
+    left = {std::vector<int64_t>(l_dim_ids_in_left, l_dim_ids_in_left + 6), l_size_left, l_ten_left.data_ptr<datatype>()};
+    right = {std::vector<int64_t>(l_dim_ids_in_right, l_dim_ids_in_right + 6), l_size_right, l_ten_right.data_ptr<datatype>()};
+    out = {std::vector<int64_t>(l_dim_ids_out, l_dim_ids_out + 5), l_size_out, l_ten_out.data_ptr<datatype>()};
+
+    einsum_ir::backend::BinaryContractionTpp bin_cont;
+    bin_cont.init(left.dim_ids.size(), right.dim_ids.size(), out.dim_ids.size(),
+                  &l_dim_sizes, &l_dim_sizes, &l_dim_sizes, nullptr, &l_dim_sizes,
+                  left.dim_ids.data(), right.dim_ids.data(), out.dim_ids.data(),
+                  datatypeEinsum, datatypeEinsum, datatypeEinsum, datatypeEinsum,
+                  einsum_ir::ZERO, einsum_ir::MADD, einsum_ir::UNDEFINED_KTYPE);
+
+    bin_cont.compile();
+    bin_cont.threading(omp_get_max_threads() * 4);
+
+    bin_cont.contract(left.data, right.data, out.data);
+  }
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  {
+    Tensor left_destributed;
+    Tensor right_destributed;
+    Tensor out_destributed;
+
+    auto dim_sizes = l_dim_sizes;
+    dim_sizes[0] = l_size_c0 / num_ranks;
+
+    // predistribute data
+    if (rank == 0) {
+      std::cout << "einsum_ir_mpi split:" << std::endl;
+
+      auto chunk_size_left = l_size_left / num_ranks;
+      auto chunk_size_right = l_size_right / num_ranks;
+
+      l_ten_out2 = at::zeros({l_size_c, l_size_n, l_size_m});
+      out2 = {std::vector<int64_t>(l_dim_ids_out, l_dim_ids_out + 5), l_size_out, l_ten_out2.data_ptr<datatype>()};
+
+      MPI_Request reqs[(num_ranks - 1) * 2];
+      for (int i = 1; i < num_ranks; i++) {
+        MPI_Isend(left.data + i * chunk_size_left, chunk_size_left, datatypeMPI, i, 0, MPI_COMM_WORLD, &reqs[i - 1]);
+        MPI_Isend(right.data + i * chunk_size_right, chunk_size_right, datatypeMPI, i, 1, MPI_COMM_WORLD, &reqs[i - 1 + num_ranks - 1]);
+      }
+
+      left_destributed = {std::vector<int64_t>(l_dim_ids_in_left, l_dim_ids_in_left + 6), chunk_size_left, left.data};
+      right_destributed = {std::vector<int64_t>(l_dim_ids_in_right, l_dim_ids_in_right + 6), chunk_size_right, right.data};
+      out_destributed = {std::vector<int64_t>(l_dim_ids_out, l_dim_ids_out + 5), l_size_out / num_ranks, out2.data};
+
+      MPI_Waitall(2 * (num_ranks - 1), reqs, MPI_STATUSES_IGNORE);
+    } else {
+      left_destributed = {std::vector<int64_t>(l_dim_ids_in_left, l_dim_ids_in_left + 6), l_size_left / num_ranks, new datatype[l_size_left / num_ranks]};
+      right_destributed = {std::vector<int64_t>(l_dim_ids_in_right, l_dim_ids_in_right + 6), l_size_right / num_ranks, new datatype[l_size_right / num_ranks]};
+      out_destributed = {std::vector<int64_t>(l_dim_ids_out, l_dim_ids_out + 5), l_size_out / num_ranks, new datatype[l_size_out / num_ranks]};
+
+      MPI_Request reqs[2];
+
+      MPI_Irecv(left_destributed.data, left_destributed.size, datatypeMPI, 0, 0, MPI_COMM_WORLD, &reqs[0]);
+      MPI_Irecv(right_destributed.data, right_destributed.size, datatypeMPI, 0, 1, MPI_COMM_WORLD, &reqs[1]);
+      MPI_Waitall(2, reqs, MPI_STATUSES_IGNORE);
+    }
+
+    // contract
+    contract_distributed_c(left_destributed, right_destributed, out_destributed, dim_sizes);
+
+    // gather data and cleanup
+    if (rank == 0) {
+      auto chunk_size_out = l_size_out / num_ranks;
+
+      MPI_Request reqs[num_ranks - 1];
+      for (int i = 1; i < num_ranks; i++) {
+        MPI_Irecv(out2.data + i * chunk_size_out, chunk_size_out, datatypeMPI, i, 0, MPI_COMM_WORLD, &reqs[i - 1]);
+      }
+
+      MPI_Waitall(num_ranks - 1, reqs, MPI_STATUSES_IGNORE);
+
+      if (at::allclose(l_ten_out, l_ten_out2)) {
+        std::cout << "SUCCESS" << std::endl;
+      } else {
+        std::cout << "FAILURE" << std::endl;
+      }
+    } else {
+      MPI_Send(out_destributed.data, out_destributed.size, datatypeMPI, 0, 0, MPI_COMM_WORLD);
+
+      delete[] left_destributed.data;
+      delete[] right_destributed.data;
+      delete[] out_destributed.data;
+    }
+  }
+}
+
+int main(int argc, char *argv[]) {
   omp_set_nested(true); // allow multiple nested parallel regions
 
   MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, NULL);
 
-  /* code */
+  benchmark();
+
   return 0;
 }
