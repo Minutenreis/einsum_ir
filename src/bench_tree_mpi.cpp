@@ -225,6 +225,9 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
 }
 
 void benchmark() {
+  std::chrono::steady_clock::time_point tp0, tp1;
+  std::chrono::duration<double> dur, dur_mpi;
+
   const int64_t l_size_c0 = 4;
 
   const int64_t l_size_m0 = 84;
@@ -296,6 +299,7 @@ void benchmark() {
     right = {std::vector<int64_t>(l_dim_ids_in_right, l_dim_ids_in_right + 6), l_size_right, l_ten_right.data_ptr<datatype>()};
     out = {std::vector<int64_t>(l_dim_ids_out, l_dim_ids_out + 5), l_size_out, l_ten_out.data_ptr<datatype>()};
 
+    tp0 = std::chrono::steady_clock::now();
     einsum_ir::backend::BinaryContractionTpp bin_cont;
     bin_cont.init(left.dim_ids.size(), right.dim_ids.size(), out.dim_ids.size(),
                   &l_dim_sizes, &l_dim_sizes, &l_dim_sizes, nullptr, &l_dim_sizes,
@@ -310,6 +314,8 @@ void benchmark() {
     std::cout << "  contract" << std::endl;
 
     bin_cont.contract(left.data, right.data, out.data);
+    tp1 = std::chrono::steady_clock::now();
+    dur = std::chrono::duration_cast<std::chrono::duration<double>>(tp1 - tp0);
   }
 
   MPI_Barrier(MPI_COMM_WORLD);
@@ -325,6 +331,10 @@ void benchmark() {
     auto chunk_size_right = l_size_right / num_ranks;
     auto chunk_size_out = l_size_out / num_ranks;
 
+    std::vector<at::Tensor> left_mpi;
+    std::vector<at::Tensor> right_mpi;
+    std::vector<at::Tensor> out_mpi;
+
     // predistribute data
     if (rank == 0) {
       std::cout << "einsum_ir_mpi:" << std::endl;
@@ -334,15 +344,25 @@ void benchmark() {
       l_ten_out2 = at::zeros({l_size_c, l_size_n, l_size_m});
       out2 = {out.dim_ids, l_size_out, l_ten_out2.data_ptr<datatype>()};
 
-      MPI_Request reqs[(num_ranks - 1) * 2];
+      left_mpi = l_ten_left.chunk(num_ranks, 0);
+      right_mpi = l_ten_right.chunk(num_ranks, 0);
+      out_mpi = l_ten_out2.chunk(num_ranks, 0);
+
       for (int i = 1; i < num_ranks; i++) {
-        MPI_Isend(left.data + i * chunk_size_left, chunk_size_left, datatypeMPI, i, 0, MPI_COMM_WORLD, &reqs[i - 1]);
-        MPI_Isend(right.data + i * chunk_size_right, chunk_size_right, datatypeMPI, i, 1, MPI_COMM_WORLD, &reqs[i - 1 + num_ranks - 1]);
+        left_mpi[i] = left_mpi[i].contiguous();
+        right_mpi[i] = right_mpi[i].contiguous();
+        out_mpi[i] = out_mpi[i].contiguous();
       }
 
-      left_destributed = {std::vector<int64_t>(l_dim_ids_in_left, l_dim_ids_in_left + 6), chunk_size_left, left.data};
-      right_destributed = {std::vector<int64_t>(l_dim_ids_in_right, l_dim_ids_in_right + 6), chunk_size_right, right.data};
-      out_destributed = {std::vector<int64_t>(l_dim_ids_out, l_dim_ids_out + 5), chunk_size_out, out2.data};
+      MPI_Request reqs[(num_ranks - 1) * 2];
+      for (int i = 1; i < num_ranks; i++) {
+        MPI_Isend(left_mpi[i].data_ptr(), chunk_size_left, datatypeMPI, i, 0, MPI_COMM_WORLD, &reqs[i - 1]);
+        MPI_Isend(right_mpi[i].data_ptr(), chunk_size_right, datatypeMPI, i, 1, MPI_COMM_WORLD, &reqs[i - 1 + num_ranks - 1]);
+      }
+
+      left_destributed = {std::vector<int64_t>(l_dim_ids_in_left, l_dim_ids_in_left + 6), chunk_size_left, left_mpi[0].data_ptr<datatype>()};
+      right_destributed = {std::vector<int64_t>(l_dim_ids_in_right, l_dim_ids_in_right + 6), chunk_size_right, right_mpi[0].data_ptr<datatype>()};
+      out_destributed = {std::vector<int64_t>(l_dim_ids_out, l_dim_ids_out + 5), chunk_size_out, out_mpi[0].data_ptr<datatype>()};
 
       MPI_Waitall(2 * (num_ranks - 1), reqs, MPI_STATUSES_IGNORE);
 
@@ -359,8 +379,13 @@ void benchmark() {
       MPI_Waitall(2, reqs, MPI_STATUSES_IGNORE);
     }
 
+    tp0 = std::chrono::steady_clock::now();
     // contract
     contract_distributed_c(left_destributed, right_destributed, out_destributed, dim_sizes);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    tp1 = std::chrono::steady_clock::now();
+    dur_mpi = std::chrono::duration_cast<std::chrono::duration<double>>(tp1 - tp0);
 
     // gather data and cleanup
     if (rank == 0) {
@@ -368,10 +393,12 @@ void benchmark() {
 
       MPI_Request reqs[num_ranks - 1];
       for (int i = 1; i < num_ranks; i++) {
-        MPI_Irecv(out2.data + i * chunk_size_out, chunk_size_out, datatypeMPI, i, 0, MPI_COMM_WORLD, &reqs[i - 1]);
+        MPI_Irecv(out_mpi[i].data_ptr(), chunk_size_out, datatypeMPI, i, 0, MPI_COMM_WORLD, &reqs[i - 1]);
       }
 
       MPI_Waitall(num_ranks - 1, reqs, MPI_STATUSES_IGNORE);
+
+      l_ten_out2 = at::cat(out_mpi, 0);
 
       if (at::allclose(l_ten_out, l_ten_out2)) {
         std::cout << "  success" << std::endl;
@@ -385,6 +412,13 @@ void benchmark() {
       delete[] right_destributed.data;
       delete[] out_destributed.data;
     }
+  }
+
+  if (rank == 0) {
+    std::cout << "times:" << std::endl;
+    std::cout << "  einsum_ir:     " << dur.count() << "s" << std::endl;
+    std::cout << "  einsum_ir_mpi: " << dur_mpi.count() << "s" << std::endl;
+    std::cout << "  speedup:       " << dur.count() / dur_mpi.count() << std::endl;
   }
 }
 
