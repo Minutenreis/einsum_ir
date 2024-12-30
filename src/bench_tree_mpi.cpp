@@ -225,10 +225,10 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
 }
 
 void benchmark() {
-  const int64_t l_size_c0 = 8;
+  const int64_t l_size_c0 = 4;
 
   const int64_t l_size_m0 = 84;
-  const int64_t l_size_m1 = 96;
+  const int64_t l_size_m1 = 32;
 
   const int64_t l_size_n0 = 84;
   const int64_t l_size_n1 = 96;
@@ -318,16 +318,16 @@ void benchmark() {
 
     auto dim_sizes = l_dim_sizes;
     dim_sizes[0] = l_size_c0 / num_ranks;
+    auto chunk_size_left = l_size_left / num_ranks;
+    auto chunk_size_right = l_size_right / num_ranks;
+    auto chunk_size_out = l_size_out / num_ranks;
 
     // predistribute data
     if (rank == 0) {
-      std::cout << "einsum_ir_mpi split:" << std::endl;
-
-      auto chunk_size_left = l_size_left / num_ranks;
-      auto chunk_size_right = l_size_right / num_ranks;
+      std::cout << "  scatter" << std::endl;
 
       l_ten_out2 = at::zeros({l_size_c, l_size_n, l_size_m});
-      out2 = {std::vector<int64_t>(l_dim_ids_out, l_dim_ids_out + 5), l_size_out, l_ten_out2.data_ptr<datatype>()};
+      out2 = {out.dim_ids, l_size_out, l_ten_out2.data_ptr<datatype>()};
 
       MPI_Request reqs[(num_ranks - 1) * 2];
       for (int i = 1; i < num_ranks; i++) {
@@ -337,13 +337,15 @@ void benchmark() {
 
       left_destributed = {std::vector<int64_t>(l_dim_ids_in_left, l_dim_ids_in_left + 6), chunk_size_left, left.data};
       right_destributed = {std::vector<int64_t>(l_dim_ids_in_right, l_dim_ids_in_right + 6), chunk_size_right, right.data};
-      out_destributed = {std::vector<int64_t>(l_dim_ids_out, l_dim_ids_out + 5), l_size_out / num_ranks, out2.data};
+      out_destributed = {std::vector<int64_t>(l_dim_ids_out, l_dim_ids_out + 5), chunk_size_out, out2.data};
 
       MPI_Waitall(2 * (num_ranks - 1), reqs, MPI_STATUSES_IGNORE);
+
+      std::cout << "  contract" << std::endl;
     } else {
-      left_destributed = {std::vector<int64_t>(l_dim_ids_in_left, l_dim_ids_in_left + 6), l_size_left / num_ranks, new datatype[l_size_left / num_ranks]};
-      right_destributed = {std::vector<int64_t>(l_dim_ids_in_right, l_dim_ids_in_right + 6), l_size_right / num_ranks, new datatype[l_size_right / num_ranks]};
-      out_destributed = {std::vector<int64_t>(l_dim_ids_out, l_dim_ids_out + 5), l_size_out / num_ranks, new datatype[l_size_out / num_ranks]};
+      left_destributed = {std::vector<int64_t>(l_dim_ids_in_left, l_dim_ids_in_left + 6), chunk_size_left, new datatype[chunk_size_left]};
+      right_destributed = {std::vector<int64_t>(l_dim_ids_in_right, l_dim_ids_in_right + 6), chunk_size_right, new datatype[chunk_size_right]};
+      out_destributed = {std::vector<int64_t>(l_dim_ids_out, l_dim_ids_out + 5), chunk_size_out, new datatype[chunk_size_out]};
 
       MPI_Request reqs[2];
 
@@ -357,7 +359,7 @@ void benchmark() {
 
     // gather data and cleanup
     if (rank == 0) {
-      auto chunk_size_out = l_size_out / num_ranks;
+      std::cout << "  gather" << std::endl;
 
       MPI_Request reqs[num_ranks - 1];
       for (int i = 1; i < num_ranks; i++) {
@@ -371,6 +373,8 @@ void benchmark() {
       } else {
         std::cout << "FAILURE" << std::endl;
       }
+
+      std::cout << "  done" << std::endl;
     } else {
       MPI_Send(out_destributed.data, out_destributed.size, datatypeMPI, 0, 0, MPI_COMM_WORLD);
 
@@ -382,11 +386,12 @@ void benchmark() {
 }
 
 int main(int argc, char *argv[]) {
+  int provided;
+  MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, &provided);
+
   omp_set_nested(true); // allow multiple nested parallel regions
 
-  MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, NULL);
-
-  benchmark();
+  // benchmark();
 
   return 0;
 }
