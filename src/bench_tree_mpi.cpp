@@ -303,8 +303,11 @@ void benchmark() {
                   datatypeEinsum, datatypeEinsum, datatypeEinsum, datatypeEinsum,
                   einsum_ir::ZERO, einsum_ir::MADD, einsum_ir::UNDEFINED_KTYPE);
 
+    std::cout << "  compile" << std::endl;
     bin_cont.compile();
     bin_cont.threading(omp_get_max_threads() * 4);
+
+    std::cout << "  contract" << std::endl;
 
     bin_cont.contract(left.data, right.data, out.data);
   }
@@ -324,6 +327,8 @@ void benchmark() {
 
     // predistribute data
     if (rank == 0) {
+      std::cout << "einsum_ir_mpi:" << std::endl;
+
       std::cout << "  scatter" << std::endl;
 
       l_ten_out2 = at::zeros({l_size_c, l_size_n, l_size_m});
@@ -369,12 +374,10 @@ void benchmark() {
       MPI_Waitall(num_ranks - 1, reqs, MPI_STATUSES_IGNORE);
 
       if (at::allclose(l_ten_out, l_ten_out2)) {
-        std::cout << "SUCCESS" << std::endl;
+        std::cout << "  success" << std::endl;
       } else {
-        std::cout << "FAILURE" << std::endl;
+        std::cout << "  failure" << std::endl;
       }
-
-      std::cout << "  done" << std::endl;
     } else {
       MPI_Send(out_destributed.data, out_destributed.size, datatypeMPI, 0, 0, MPI_COMM_WORLD);
 
@@ -385,13 +388,15 @@ void benchmark() {
   }
 }
 
-int main(int argc, char *argv[]) {
+int main() {
   int provided;
-  MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, &provided);
+  MPI_Init_thread(NULL, NULL, MPI_THREAD_SERIALIZED, &provided);
 
   omp_set_nested(true); // allow multiple nested parallel regions
 
-  // benchmark();
+  benchmark();
 
-  return 0;
+  MPI_Finalize();
+
+  return EXIT_SUCCESS;
 }
