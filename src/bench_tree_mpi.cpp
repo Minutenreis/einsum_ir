@@ -265,12 +265,12 @@ void benchmark() {
   l_dim_sizes.insert(std::pair<int64_t, int64_t>(6, l_size_k1)); // k1
   l_dim_sizes.insert(std::pair<int64_t, int64_t>(7, l_size_k2)); // k2
 
-  //                              c0 m0 k0 k1 k2 m1
-  int64_t l_dim_ids_in_left[6] = {0, 1, 5, 6, 7, 2};
-  //                               c0 n0 k0 k1 n1 k2
-  int64_t l_dim_ids_in_right[6] = {0, 3, 5, 6, 4, 7};
-  //                          c0 n0 m0 n1 m1
-  int64_t l_dim_ids_out[5] = {0, 3, 1, 4, 2};
+  //                                      m0 c0 k0 k1 k2 m1
+  std::vector<int64_t> l_dim_ids_in_left({1, 0, 5, 6, 7, 2});
+  //                                       n0 c0 k0 k1 n1 k2
+  std::vector<int64_t> l_dim_ids_in_right({3, 0, 5, 6, 4, 7});
+  //                                  n0 m0 c0 n1 m1
+  std::vector<int64_t> l_dim_ids_out({3, 1, 0, 4, 2});
 
   at::Tensor l_ten_left;
   at::Tensor l_ten_right;
@@ -295,9 +295,44 @@ void benchmark() {
     l_ten_right = at::rand({l_size_c, l_size_n, l_size_k});
     l_ten_out = at::zeros({l_size_c, l_size_n, l_size_m});
 
-    left = {std::vector<int64_t>(l_dim_ids_in_left, l_dim_ids_in_left + 6), l_size_left, l_ten_left.data_ptr<datatype>()};
-    right = {std::vector<int64_t>(l_dim_ids_in_right, l_dim_ids_in_right + 6), l_size_right, l_ten_right.data_ptr<datatype>()};
-    out = {std::vector<int64_t>(l_dim_ids_out, l_dim_ids_out + 5), l_size_out, l_ten_out.data_ptr<datatype>()};
+    l_ten_left = l_ten_left.view({
+                                     l_size_c0, // 0
+                                     l_size_m0, // 1
+                                     l_size_m1, // 2
+                                     l_size_k0, // 3
+                                     l_size_k1, // 4
+                                     l_size_k2, // 5
+                                 })
+                     //        m0 c0 k0 k1 k2 m1
+                     .permute({1, 0, 3, 4, 5, 2})
+                     .contiguous();
+
+    l_ten_right = l_ten_right.view({
+                                       l_size_c0, // 0
+                                       l_size_n0, // 1
+                                       l_size_n1, // 2
+                                       l_size_k0, // 3
+                                       l_size_k1, // 4
+                                       l_size_k2, // 5
+                                   })
+                      //        n0 c0 k0 k1 n1 k2
+                      .permute({1, 0, 3, 4, 2, 5})
+                      .contiguous();
+
+    l_ten_out = l_ten_out.view({
+                                   l_size_c0, // 0
+                                   l_size_n0, // 1
+                                   l_size_n1, // 2
+                                   l_size_m0, // 3
+                                   l_size_m1, // 4
+                               })
+                    //        n0 m0 c0 n1 m1
+                    .permute({1, 3, 0, 4, 2})
+                    .contiguous();
+
+    left = {l_dim_ids_in_left, l_size_left, l_ten_left.data_ptr<datatype>()};
+    right = {l_dim_ids_in_right, l_size_right, l_ten_right.data_ptr<datatype>()};
+    out = {l_dim_ids_out, l_size_out, l_ten_out.data_ptr<datatype>()};
 
     tp0 = std::chrono::steady_clock::now();
     einsum_ir::backend::BinaryContractionTpp bin_cont;
@@ -341,12 +376,12 @@ void benchmark() {
 
       std::cout << "  scatter" << std::endl;
 
-      l_ten_out2 = at::zeros({l_size_c, l_size_n, l_size_m});
+      l_ten_out2 = at::zeros_like(l_ten_out);
       out2 = {out.dim_ids, l_size_out, l_ten_out2.data_ptr<datatype>()};
 
-      left_mpi = l_ten_left.chunk(num_ranks, 0);
-      right_mpi = l_ten_right.chunk(num_ranks, 0);
-      out_mpi = l_ten_out2.chunk(num_ranks, 0);
+      left_mpi = l_ten_left.chunk(num_ranks, 1);
+      right_mpi = l_ten_right.chunk(num_ranks, 1);
+      out_mpi = l_ten_out2.chunk(num_ranks, 2);
 
       for (int i = 1; i < num_ranks; i++) {
         left_mpi[i] = left_mpi[i].contiguous();
@@ -360,17 +395,17 @@ void benchmark() {
         MPI_Isend(right_mpi[i].data_ptr(), chunk_size_right, datatypeMPI, i, 1, MPI_COMM_WORLD, &reqs[i - 1 + num_ranks - 1]);
       }
 
-      left_destributed = {std::vector<int64_t>(l_dim_ids_in_left, l_dim_ids_in_left + 6), chunk_size_left, left_mpi[0].data_ptr<datatype>()};
-      right_destributed = {std::vector<int64_t>(l_dim_ids_in_right, l_dim_ids_in_right + 6), chunk_size_right, right_mpi[0].data_ptr<datatype>()};
-      out_destributed = {std::vector<int64_t>(l_dim_ids_out, l_dim_ids_out + 5), chunk_size_out, out_mpi[0].data_ptr<datatype>()};
+      left_destributed = {l_dim_ids_in_left, chunk_size_left, left_mpi[0].data_ptr<datatype>()};
+      right_destributed = {l_dim_ids_in_right, chunk_size_right, right_mpi[0].data_ptr<datatype>()};
+      out_destributed = {l_dim_ids_out, chunk_size_out, out_mpi[0].data_ptr<datatype>()};
 
       MPI_Waitall(2 * (num_ranks - 1), reqs, MPI_STATUSES_IGNORE);
 
       std::cout << "  contract" << std::endl;
     } else {
-      left_destributed = {std::vector<int64_t>(l_dim_ids_in_left, l_dim_ids_in_left + 6), chunk_size_left, new datatype[chunk_size_left]};
-      right_destributed = {std::vector<int64_t>(l_dim_ids_in_right, l_dim_ids_in_right + 6), chunk_size_right, new datatype[chunk_size_right]};
-      out_destributed = {std::vector<int64_t>(l_dim_ids_out, l_dim_ids_out + 5), chunk_size_out, new datatype[chunk_size_out]};
+      left_destributed = {l_dim_ids_in_left, chunk_size_left, new datatype[chunk_size_left]};
+      right_destributed = {l_dim_ids_in_right, chunk_size_right, new datatype[chunk_size_right]};
+      out_destributed = {l_dim_ids_out, chunk_size_out, new datatype[chunk_size_out]};
 
       MPI_Request reqs[2];
 
@@ -398,12 +433,15 @@ void benchmark() {
 
       MPI_Waitall(num_ranks - 1, reqs, MPI_STATUSES_IGNORE);
 
-      l_ten_out2 = at::cat(out_mpi, 0);
+      l_ten_out2 = at::cat(out_mpi, 2).contiguous();
 
       if (at::allclose(l_ten_out, l_ten_out2)) {
-        std::cout << "  success" << std::endl;
+        std::cout << "success" << std::endl;
+        std::cout << "  einsum_ir:     " << dur.count() << "s" << std::endl;
+        std::cout << "  einsum_ir_mpi: " << dur_mpi.count() << "s" << std::endl;
+        std::cout << "  speedup:       " << dur.count() / dur_mpi.count() << std::endl;
       } else {
-        std::cout << "  failure" << std::endl;
+        std::cout << "failure" << std::endl;
       }
     } else {
       MPI_Send(out_destributed.data, out_destributed.size, datatypeMPI, 0, 0, MPI_COMM_WORLD);
@@ -412,13 +450,6 @@ void benchmark() {
       delete[] right_destributed.data;
       delete[] out_destributed.data;
     }
-  }
-
-  if (rank == 0) {
-    std::cout << "times:" << std::endl;
-    std::cout << "  einsum_ir:     " << dur.count() << "s" << std::endl;
-    std::cout << "  einsum_ir_mpi: " << dur_mpi.count() << "s" << std::endl;
-    std::cout << "  speedup:       " << dur.count() / dur_mpi.count() << std::endl;
   }
 }
 
