@@ -265,12 +265,12 @@ void benchmark() {
   l_dim_sizes.insert(std::pair<int64_t, int64_t>(6, l_size_k1)); // k1
   l_dim_sizes.insert(std::pair<int64_t, int64_t>(7, l_size_k2)); // k2
 
-  //                                      m0 c0 k0 k1 k2 m1
-  std::vector<int64_t> l_dim_ids_in_left({1, 0, 5, 6, 7, 2});
-  //                                       n0 c0 k0 k1 n1 k2
-  std::vector<int64_t> l_dim_ids_in_right({3, 0, 5, 6, 4, 7});
-  //                                  n0 m0 c0 n1 m1
-  std::vector<int64_t> l_dim_ids_out({3, 1, 0, 4, 2});
+  //                                      c0 m0 k0 k1 k2 m1
+  std::vector<int64_t> l_dim_ids_in_left({0, 1, 5, 6, 7, 2});
+  //                                       c0 n0 k0 k1 n1 k2
+  std::vector<int64_t> l_dim_ids_in_right({0, 3, 5, 6, 4, 7});
+  //                                  c0 n0 m0 n1 m1
+  std::vector<int64_t> l_dim_ids_out({0, 3, 1, 4, 2});
 
   at::Tensor l_ten_left;
   at::Tensor l_ten_right;
@@ -280,7 +280,6 @@ void benchmark() {
   Tensor left;
   Tensor right;
   Tensor out;
-  Tensor out2;
 
   int rank = 0;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -303,8 +302,8 @@ void benchmark() {
                                      l_size_k1, // 4
                                      l_size_k2, // 5
                                  })
-                     //        m0 c0 k0 k1 k2 m1
-                     .permute({1, 0, 3, 4, 5, 2})
+                     //        c0 m0 k0 k1 k2 m1
+                     .permute({0, 1, 3, 4, 5, 2})
                      .contiguous();
 
     l_ten_right = l_ten_right.view({
@@ -315,8 +314,8 @@ void benchmark() {
                                        l_size_k1, // 4
                                        l_size_k2, // 5
                                    })
-                      //        n0 c0 k0 k1 n1 k2
-                      .permute({1, 0, 3, 4, 2, 5})
+                      //        c0 n0 k0 k1 n1 k2
+                      .permute({0, 1, 3, 4, 2, 5})
                       .contiguous();
 
     l_ten_out = l_ten_out.view({
@@ -326,8 +325,8 @@ void benchmark() {
                                    l_size_m0, // 3
                                    l_size_m1, // 4
                                })
-                    //        n0 m0 c0 n1 m1
-                    .permute({1, 3, 0, 4, 2})
+                    //        c0 n0 m0 n1 m1
+                    .permute({0, 1, 3, 4, 2})
                     .contiguous();
 
     left = {l_dim_ids_in_left, l_size_left, l_ten_left.data_ptr<datatype>()};
@@ -377,11 +376,10 @@ void benchmark() {
       std::cout << "  scatter" << std::endl;
 
       l_ten_out2 = at::zeros_like(l_ten_out);
-      out2 = {out.dim_ids, l_size_out, l_ten_out2.data_ptr<datatype>()};
 
-      left_mpi = l_ten_left.chunk(num_ranks, 1);
-      right_mpi = l_ten_right.chunk(num_ranks, 1);
-      out_mpi = l_ten_out2.chunk(num_ranks, 2);
+      left_mpi = l_ten_left.chunk(num_ranks, 0);
+      right_mpi = l_ten_right.chunk(num_ranks, 0);
+      out_mpi = l_ten_out2.chunk(num_ranks, 0);
 
       for (int i = 1; i < num_ranks; i++) {
         left_mpi[i] = left_mpi[i].contiguous();
@@ -433,7 +431,7 @@ void benchmark() {
 
       MPI_Waitall(num_ranks - 1, reqs, MPI_STATUSES_IGNORE);
 
-      l_ten_out2 = at::cat(out_mpi, 2).contiguous();
+      l_ten_out2 = at::cat(out_mpi, 0).contiguous();
 
       if (at::allclose(l_ten_out, l_ten_out2)) {
         std::cout << "success" << std::endl;
