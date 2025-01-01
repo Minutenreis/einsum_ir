@@ -1,0 +1,164 @@
+%known mistakes (fixed):
+%   missing letter in binary network contraction cost calculation ++
+%   aK instead of nK in figure 17
+%   figure 15: sizes of k's are one too small
+%   one letter in the caption of one pie chart is wrong
+
+\documentclass[a4paper, 12pt]{article}
+
+\usepackage[left=4.0cm, right=2.0cm, top=3.0cm, bottom=3.0cm]{geometry}
+\usepackage[affil-it]{authblk}
+
+% for code
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\renewcommand{\algorithmicrequire}{\textbf{Input:}}
+\renewcommand{\algorithmicensure}{\textbf{Output:}}
+
+\usepackage{listings}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{setspace}
+\usepackage{enumitem}
+
+%language
+\usepackage[main=english,ngerman]{babel}
+\usepackage{csquotes}
+
+%paragraph spacing
+\usepackage{parskip}
+
+
+%bibliography stuff
+\usepackage{biblatex} %main bibliography package
+\addbibresource{bibliography/bibliography.bib}
+
+\usepackage{tabularx}
+
+%graphics
+\usepackage{graphicx}
+%\usepackage{float}
+%\usepackage{subfig}
+\usepackage{subcaption}
+
+\graphicspath{ {./graphics/eps} }
+
+\emergencystretch=1em
+
+\title{Scaling Out: Distributed Memory Parallelism for Einsum Trees}
+\author{Justus Dreßler \\ justus.dressler@uni-jena.de \\ Friedrich Schiller University Jena}
+
+
+
+\begin{document}
+
+\thispagestyle{empty} 
+%\onehalfspacing
+%\doublespacing
+
+
+%\begin{titlepage}
+    \begin{center}
+        \includegraphics*[]{logo}
+    \end{center}
+
+    \vspace{40pt}
+
+    \begin{center}
+        \huge
+        \textbf{Scaling Out: Distributed Memory Parallelism for Einsum Trees}
+    \end{center}
+    
+    \vspace{20pt}
+
+    \begin{center}
+        \Large
+        \textbf{BACHELOR'S THESIS}
+    \end{center}
+
+    %\vspace{5pt}
+
+    \begin{center}
+        \Large
+        to attain the academic degree \\
+        Bachelor of Science (B.Sc.) \\
+        in Computer Science (Informatik)
+    \end{center}
+
+    \vspace{20pt}
+
+    \begin{center}
+        \large
+        \textbf{FRIEDRICH SCHILLER UNIVERSITY JENA} \\
+        Faculty of Mathematics and Computer Science \\
+    \end{center}
+
+    \vspace{20pt}
+
+    \begin{center}
+        \large
+        submitted by Justus Dreßler \\
+        born on 04.08.2002 in Jena \\
+        advisor: Prof. Dr. A. Breuer \\
+        Jena, 23.1.2025
+    \end{center}
+
+
+
+    
+%\end{titlepage}
+\newpage
+
+
+
+\input{sections/abstract}
+
+\newpage
+
+\thispagestyle{empty} 
+\tableofcontents
+\newpage
+
+% \input{sections/acknowledgments}
+
+% \newpage
+
+% \input{sections/introduction}
+
+% \input{sections/intro_tensors}
+
+% \input{sections/matmul}
+
+% \input{sections/related_work}
+
+% \input{sections/approach}
+
+% \input{sections/results}
+
+% \input{sections/conclusion}
+
+\clearpage
+
+%\renewcommand{\thepage}{}
+\printbibliography
+
+\newpage
+\thispagestyle{empty} 
+\section*{Declaration of independence}
+\begin{otherlanguage}{ngerman}
+Ich erkläre, dass ich die vorliegende Arbeit selbstständig und nur unter Verwendung der
+angegebenen Quellen und Hilfsmittel angefertigt habe.
+
+%\vspace{3mm}
+
+Seitens des Verfassers bestehen keine Einwände die vorliegende Bachelorarbeit für die öffentliche Benutzung im
+Universitätsarchiv zur Verfügung zu stellen.
+\end{otherlanguage}
+
+\vspace{30mm}
+
+{\raggedleft 
+Jena, den 23.01.2025 \\
+}
+
+\end{document}
