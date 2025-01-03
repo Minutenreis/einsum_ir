@@ -1,0 +1,7 @@
+## Todos
+
+[ ] Begründung für Tensorparallelismus
+[ ] Einführung schreiben
+[ ] Anhang schreiben
+[ ] Kurzfassung schreiben
+[ ] Acknowledgement schreiben
