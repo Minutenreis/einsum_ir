@@ -148,9 +148,6 @@ void contract_distributed_m_n_out_m(Tensor &left, Tensor &right, Tensor &out, st
 }
 
 datatype *getOffset(datatype *data, int rank, int num_ranks, int64_t chunk_size, int64_t step) {
-  if (rank == 0) {
-    std::cout << (((rank + 1) * 2 + step) % (2 * num_ranks)) << std::endl;
-  }
   return data + (((rank + 1) * 2 + step) % (2 * num_ranks)) * chunk_size;
 }
 
@@ -185,11 +182,10 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
 
   int64_t buffer_size = out.size / 2;
   int64_t chunk_size_right = right.size / (2 * num_ranks);
-  datatype *new_buffer = new datatype[buffer_size];
 
-  datatype *send_buffer = out.data;
-  datatype *calc_buffer = out.data + buffer_size;
-  datatype *recv_buffer = new_buffer;
+  datatype *send_buffer = new datatype[buffer_size]{};
+  datatype *calc_buffer = new datatype[buffer_size]{};
+  datatype *recv_buffer = new datatype[buffer_size]{};
 
   /**
    * at the end send_buffer has to be out.data and calc_buffer has to be out.data + buffer_size
@@ -222,7 +218,7 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
       } else {
         bin_cont.contract(left.data, getOffset(right.data, rank, num_ranks, chunk_size_right, i), calc_buffer);
       }
-      // might need barrier here?
+// might need barrier here?
 #pragma omp single
       {
         // rotate buffers
@@ -234,6 +230,16 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
     }
   }
   bin_cont.contract(left.data, getOffset(right.data, rank, num_ranks, chunk_size_right, num_ranks * 2 - 1), calc_buffer);
+
+  // not needed if we can assume out.data to be 0 initialized
+  for (int i = 0; i < buffer_size; i++) {
+    out.data[i] += send_buffer[i];
+    out.data[i + buffer_size] += calc_buffer[i];
+  }
+
+  delete[] send_buffer;
+  delete[] calc_buffer;
+  delete[] recv_buffer;
 }
 
 void benchmark() {
@@ -248,9 +254,9 @@ void benchmark() {
   const int64_t l_size_n0 = 32;
   const int64_t l_size_n1 = 96;
 
-  const int64_t l_size_k0 = 2;
-  const int64_t l_size_k1 = 84;
-  const int64_t l_size_k2 = 84;
+  const int64_t l_size_k0 = 16;
+  const int64_t l_size_k1 = 16;
+  const int64_t l_size_k2 = 32;
 
   const int64_t l_size_c = l_size_c0;
   const int64_t l_size_m = l_size_m0 * l_size_m1;
@@ -286,9 +292,9 @@ void benchmark() {
   l_dim_sizes.insert(std::pair<int64_t, int64_t>(k1, l_size_k1));
   l_dim_sizes.insert(std::pair<int64_t, int64_t>(k2, l_size_k2));
 
-  std::vector<int64_t> l_dim_ids_in_left({m0, c0, k0, k1, k2, m1});
+  std::vector<int64_t> l_dim_ids_in_left({c0, m0, k0, k1, k2, m1});
   std::vector<int64_t> l_dim_ids_in_right({n0, c0, k0, k1, n1, k2});
-  std::vector<int64_t> l_dim_ids_out({n0, m0, c0, n1, m1});
+  std::vector<int64_t> l_dim_ids_out({n0, c0, m0, n1, m1});
 
   at::Tensor l_ten_left;
   at::Tensor l_ten_right;
@@ -320,8 +326,8 @@ void benchmark() {
                                      l_size_k1, // 4
                                      l_size_k2, // 5
                                  })
-                     //        m0 c0 k0 k1 k2 m1
-                     .permute({1, 0, 3, 4, 5, 2})
+                     //        c0 m0 k0 k1 k2 m1
+                     .permute({0, 1, 3, 4, 5, 2})
                      .contiguous();
 
     l_ten_right = l_ten_right.view({
@@ -343,8 +349,8 @@ void benchmark() {
                                    l_size_m0, // 3
                                    l_size_m1, // 4
                                })
-                    //        n0 m0 c0 n1 m1
-                    .permute({1, 3, 0, 4, 2})
+                    //        n0 c0 m0 n1 m1
+                    .permute({1, 0, 3, 4, 2})
                     .contiguous();
 
     left = {l_dim_ids_in_left, l_size_left, l_ten_left.data_ptr<datatype>()};
@@ -377,8 +383,6 @@ void benchmark() {
     Tensor right_destributed;
     Tensor out_destributed;
 
-    auto dim_sizes = l_dim_sizes;
-    dim_sizes[k0] = l_size_k0 / num_ranks;
     auto chunk_size_left = l_size_left / num_ranks;
     auto chunk_size_right = l_size_right / num_ranks;
     auto chunk_size_out = l_size_out / num_ranks;
@@ -391,16 +395,20 @@ void benchmark() {
     int einsum_split_right_dim = k0;
     int einsum_split_out_dim = n0;
 
-    // torch id of dimension to split
-    auto it = std::find(l_dim_ids_in_left.begin(), l_dim_ids_in_left.end(), einsum_split_left_dim);
-    int ten_split_left_dim = std::distance(l_dim_ids_in_left.begin(), it);
-    it = std::find(l_dim_ids_in_right.begin(), l_dim_ids_in_right.end(), einsum_split_right_dim);
-    int ten_split_right_dim = std::distance(l_dim_ids_in_right.begin(), it);
-    it = std::find(l_dim_ids_out.begin(), l_dim_ids_out.end(), einsum_split_out_dim);
-    int ten_split_out_dim = std::distance(l_dim_ids_out.begin(), it);
+    auto dim_sizes = l_dim_sizes;
+    dim_sizes[k0] /= num_ranks;
+    int ten_split_left_dim, ten_split_right_dim, ten_split_out_dim;
 
     // predistribute data
     if (rank == 0) {
+      // torch id of dimension to split
+      auto it = std::find(left.dim_ids.begin(), left.dim_ids.end(), einsum_split_left_dim);
+      ten_split_left_dim = std::distance(left.dim_ids.begin(), it);
+      it = std::find(right.dim_ids.begin(), right.dim_ids.end(), einsum_split_right_dim);
+      ten_split_right_dim = std::distance(right.dim_ids.begin(), it);
+      it = std::find(out.dim_ids.begin(), out.dim_ids.end(), einsum_split_out_dim);
+      ten_split_out_dim = std::distance(out.dim_ids.begin(), it);
+
       std::cout << "einsum_ir_mpi:" << std::endl;
 
       std::cout << "  scatter" << std::endl;
