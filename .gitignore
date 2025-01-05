@@ -8,3 +8,4 @@ config.log
 .vscode
 /samples/einsum_benchmark/instances
 logs
+*.btr
