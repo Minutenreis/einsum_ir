@@ -3,8 +3,8 @@
 
 #include <omp.h>
 
-#include "backend/BinaryContractionTpp.h"
-#include "backend/EinsumNode.h"
+#include "../backend/BinaryContractionTpp.h"
+#include "../backend/EinsumNode.h"
 #include <ATen/ATen.h>
 #include <mpi.h>
 
@@ -76,11 +76,12 @@ void contract_distributed_m_n_out_n(Tensor &left, Tensor &right, Tensor &out, st
   {
     for (int i = 0; i < num_ranks - 1; i++) {
       if (omp_get_thread_num() == 0) {
-        MPI_Isend(calc_buffer, left.size, datatypeMPI, previous, 0, MPI_COMM_WORLD, &reqs[0]);
-        MPI_Irecv(recv_buffer, left.size, datatypeMPI, next, 0, MPI_COMM_WORLD, &reqs[1]);
+        MPI_Isend(calc_buffer, right.size, datatypeMPI, previous, 0, MPI_COMM_WORLD, &reqs[0]);
+        MPI_Irecv(recv_buffer, right.size, datatypeMPI, next, 0, MPI_COMM_WORLD, &reqs[1]);
         MPI_Waitall(2, reqs, MPI_STATUSES_IGNORE);
       } else {
-        bin_cont.contract(calc_buffer, right.data, out.data + ((rank + i) % num_ranks) * chunk_size);
+        // +1 is important so after the last iteration calc_buffer is the right buffer
+        bin_cont.contract(left.data, calc_buffer, out.data + ((rank + i) % num_ranks) * chunk_size);
       }
       // might need barrier here?
 #pragma omp single
@@ -88,7 +89,7 @@ void contract_distributed_m_n_out_n(Tensor &left, Tensor &right, Tensor &out, st
     }
   }
 
-  bin_cont.contract(calc_buffer, right.data, out.data + ((rank + num_ranks - 1) % num_ranks) * chunk_size);
+  bin_cont.contract(left.data, calc_buffer, out.data + ((rank + num_ranks - 1) % num_ranks) * chunk_size);
 
   delete[] new_buffer;
 }
@@ -279,8 +280,8 @@ void benchmark() {
   std::vector<int64_t> l_dim_ids_in_left({1, 0, 5, 6, 7, 2});
   //                                       n0 c0 k0 k1 n1 k2
   std::vector<int64_t> l_dim_ids_in_right({3, 0, 5, 6, 4, 7});
-  //                                  m0 n0 c0 n1 m1
-  std::vector<int64_t> l_dim_ids_out({1, 3, 0, 4, 2});
+  //                                  n0 m0 c0 n1 m1
+  std::vector<int64_t> l_dim_ids_out({3, 1, 0, 4, 2});
 
   at::Tensor l_ten_left;
   at::Tensor l_ten_right;
@@ -429,7 +430,7 @@ void benchmark() {
 
     tp0 = std::chrono::steady_clock::now();
     // contract
-    contract_distributed_m_n_out_n(left_destributed, right_destributed, out_destributed, dim_sizes);
+    contract_distributed_m_n_out_m(left_destributed, right_destributed, out_destributed, dim_sizes);
 
     MPI_Barrier(MPI_COMM_WORLD);
     tp1 = std::chrono::steady_clock::now();

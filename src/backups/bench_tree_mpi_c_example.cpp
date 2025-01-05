@@ -3,8 +3,8 @@
 
 #include <omp.h>
 
-#include "backend/BinaryContractionTpp.h"
-#include "backend/EinsumNode.h"
+#include "../backend/BinaryContractionTpp.h"
+#include "../backend/EinsumNode.h"
 #include <ATen/ATen.h>
 #include <mpi.h>
 
@@ -40,61 +40,6 @@ void contract_distributed_c(Tensor &left, Tensor &right, Tensor &out, std::map<i
 }
 
 // expect dim_sizes to be fitting the distributed tensor and not the original
-// cmk = left, cnk = right, cmn = out (not in that order)
-// expects m to be the outer most dimension in the output
-void contract_distributed_m_n_out_n(Tensor &left, Tensor &right, Tensor &out, std::map<int64_t, int64_t> dim_sizes) {
-  einsum_ir::backend::BinaryContractionTpp bin_cont;
-
-  bin_cont.init(left.dim_ids.size(), right.dim_ids.size(), out.dim_ids.size(),
-                &dim_sizes, &dim_sizes, &dim_sizes, nullptr, &dim_sizes,
-                left.dim_ids.data(), right.dim_ids.data(), out.dim_ids.data(),
-                datatypeEinsum, datatypeEinsum, datatypeEinsum, datatypeEinsum,
-                einsum_ir::ZERO, einsum_ir::MADD, einsum_ir::UNDEFINED_KTYPE);
-
-  bin_cont.compile();
-  bin_cont.threading(omp_get_max_threads() * 4);
-
-  int num_ranks;
-  MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
-
-  int rank;
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-
-  int previous = (rank - 1 + num_ranks) % num_ranks; // + num_ranks to avoid negative values
-  int next = (rank + 1) % num_ranks;
-
-  int64_t chunk_size = out.size / num_ranks;
-
-  MPI_Request reqs[2];
-
-  datatype *new_buffer = new datatype[left.size];
-
-  datatype *calc_buffer = left.data;
-  datatype *recv_buffer = new_buffer;
-
-#pragma omp parallel num_threads(2)
-  {
-    for (int i = 0; i < num_ranks - 1; i++) {
-      if (omp_get_thread_num() == 0) {
-        MPI_Isend(calc_buffer, left.size, datatypeMPI, previous, 0, MPI_COMM_WORLD, &reqs[0]);
-        MPI_Irecv(recv_buffer, left.size, datatypeMPI, next, 0, MPI_COMM_WORLD, &reqs[1]);
-        MPI_Waitall(2, reqs, MPI_STATUSES_IGNORE);
-      } else {
-        bin_cont.contract(calc_buffer, right.data, out.data + ((rank + i) % num_ranks) * chunk_size);
-      }
-      // might need barrier here?
-#pragma omp single
-      std::swap(calc_buffer, recv_buffer);
-    }
-  }
-
-  bin_cont.contract(calc_buffer, right.data, out.data + ((rank + num_ranks - 1) % num_ranks) * chunk_size);
-
-  delete[] new_buffer;
-}
-
-// expect dim_sizes to be fitting the distributed tensor and not the original
-// cmk = left, cnk = right, cmn = out (not in that order)
 // expects n to be the outer most dimension in the output
 void contract_distributed_m_n_out_m(Tensor &left, Tensor &right, Tensor &out, std::map<int64_t, int64_t> dim_sizes) {
   einsum_ir::backend::BinaryContractionTpp bin_cont;
@@ -114,25 +59,21 @@ void contract_distributed_m_n_out_m(Tensor &left, Tensor &right, Tensor &out, st
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-  // + num_ranks to avoid negative values
-  int previous = (rank - 1 + num_ranks) % num_ranks;
-  int next = (rank + 1) % num_ranks;
-
   int64_t chunk_size = out.size / num_ranks;
 
   MPI_Request reqs[2];
 
-  datatype *new_buffer = new datatype[right.size];
+  datatype *new_buffer = new datatype[left.size];
 
-  datatype *calc_buffer = right.data;
+  datatype *calc_buffer = left.data;
   datatype *recv_buffer = new_buffer;
 
 #pragma omp parallel num_threads(2)
   {
     for (int i = 0; i < num_ranks - 1; i++) {
       if (omp_get_thread_num() == 0) {
-        MPI_Isend(calc_buffer, right.size, datatypeMPI, previous, 0, MPI_COMM_WORLD, &reqs[0]);
-        MPI_Irecv(recv_buffer, right.size, datatypeMPI, next, 0, MPI_COMM_WORLD, &reqs[1]);
+        MPI_Isend(calc_buffer, right.size, datatypeMPI, (rank - 1 + num_ranks) % num_ranks, 0, MPI_COMM_WORLD, &reqs[0]);
+        MPI_Irecv(recv_buffer, right.size, datatypeMPI, (rank + 1) % num_ranks, 0, MPI_COMM_WORLD, &reqs[1]);
         MPI_Waitall(2, reqs, MPI_STATUSES_IGNORE);
       } else {
         bin_cont.contract(left.data, calc_buffer, out.data + ((rank + i) % num_ranks) * chunk_size);
@@ -142,7 +83,58 @@ void contract_distributed_m_n_out_m(Tensor &left, Tensor &right, Tensor &out, st
       std::swap(calc_buffer, recv_buffer);
     }
   }
-  bin_cont.contract(left.data, calc_buffer, out.data + ((rank + num_ranks - 1) % num_ranks) * chunk_size);
+
+  bin_cont.contract(left.data, calc_buffer, out.data + ((rank + (num_ranks - 1)) % num_ranks) * chunk_size);
+
+  delete[] new_buffer;
+}
+
+// expect dim_sizes to be fitting the distributed tensor and not the original
+// expects m to be the outer most dimension in the output
+void contract_distributed_m_n_out_n(Tensor &left, Tensor &right, Tensor &out, std::map<int64_t, int64_t> dim_sizes) {
+  einsum_ir::backend::BinaryContractionTpp bin_cont;
+
+  bin_cont.init(left.dim_ids.size(), right.dim_ids.size(), out.dim_ids.size(),
+                &dim_sizes, &dim_sizes, &dim_sizes, nullptr, &dim_sizes,
+                left.dim_ids.data(), right.dim_ids.data(), out.dim_ids.data(),
+                datatypeEinsum, datatypeEinsum, datatypeEinsum, datatypeEinsum,
+                einsum_ir::ZERO, einsum_ir::MADD, einsum_ir::UNDEFINED_KTYPE);
+
+  bin_cont.compile();
+  bin_cont.threading(omp_get_max_threads() * 4);
+
+  int num_ranks;
+  MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
+
+  int rank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+  int64_t chunk_size = out.size / num_ranks;
+
+  MPI_Request reqs[2];
+
+  datatype *new_buffer = new datatype[left.size];
+
+  datatype *calc_buffer = left.data;
+  datatype *recv_buffer = new_buffer;
+
+#pragma omp parallel num_threads(2)
+  {
+    for (int i = 0; i < num_ranks - 1; i++) {
+      if (omp_get_thread_num() == 0) {
+        MPI_Isend(calc_buffer, left.size, datatypeMPI, (rank - 1 + num_ranks) % num_ranks, 0, MPI_COMM_WORLD, &reqs[0]);
+        MPI_Irecv(recv_buffer, left.size, datatypeMPI, (rank + 1) % num_ranks, 0, MPI_COMM_WORLD, &reqs[1]);
+        MPI_Waitall(2, reqs, MPI_STATUSES_IGNORE);
+      } else {
+        bin_cont.contract(calc_buffer, right.data, out.data + ((rank + i) % num_ranks) * chunk_size);
+      }
+      // might need barrier here?
+#pragma omp single
+      std::swap(calc_buffer, recv_buffer);
+    }
+  }
+
+  bin_cont.contract(calc_buffer, right.data, out.data + ((rank + num_ranks - 1) % num_ranks) * chunk_size);
 
   delete[] new_buffer;
 }
@@ -279,8 +271,8 @@ void benchmark() {
   std::vector<int64_t> l_dim_ids_in_left({1, 0, 5, 6, 7, 2});
   //                                       n0 c0 k0 k1 n1 k2
   std::vector<int64_t> l_dim_ids_in_right({3, 0, 5, 6, 4, 7});
-  //                                  m0 n0 c0 n1 m1
-  std::vector<int64_t> l_dim_ids_out({1, 3, 0, 4, 2});
+  //                                  n0 m0 c0 n1 m1
+  std::vector<int64_t> l_dim_ids_out({3, 1, 0, 4, 2});
 
   at::Tensor l_ten_left;
   at::Tensor l_ten_right;
@@ -370,8 +362,7 @@ void benchmark() {
     Tensor out_destributed;
 
     auto dim_sizes = l_dim_sizes;
-    dim_sizes[1] = l_size_m0 / num_ranks;
-    dim_sizes[3] = l_size_n0 / num_ranks;
+    dim_sizes[0] = l_size_c0 / num_ranks;
     auto chunk_size_left = l_size_left / num_ranks;
     auto chunk_size_right = l_size_right / num_ranks;
     auto chunk_size_out = l_size_out / num_ranks;
@@ -379,10 +370,6 @@ void benchmark() {
     std::vector<at::Tensor> left_mpi;
     std::vector<at::Tensor> right_mpi;
     std::vector<at::Tensor> out_mpi;
-
-    int ten_split_left_dim = 0;
-    int ten_split_right_dim = 0;
-    int ten_split_out_dim = 1;
 
     // predistribute data
     if (rank == 0) {
@@ -392,9 +379,9 @@ void benchmark() {
 
       l_ten_out2 = at::zeros_like(l_ten_out);
 
-      left_mpi = l_ten_left.chunk(num_ranks, ten_split_left_dim);
-      right_mpi = l_ten_right.chunk(num_ranks, ten_split_right_dim);
-      out_mpi = l_ten_out2.chunk(num_ranks, ten_split_out_dim);
+      left_mpi = l_ten_left.chunk(num_ranks, 1);
+      right_mpi = l_ten_right.chunk(num_ranks, 1);
+      out_mpi = l_ten_out2.chunk(num_ranks, 2);
 
       for (int i = 0; i < num_ranks; i++) {
         left_mpi[i] = left_mpi[i].contiguous();
@@ -429,7 +416,7 @@ void benchmark() {
 
     tp0 = std::chrono::steady_clock::now();
     // contract
-    contract_distributed_m_n_out_n(left_destributed, right_destributed, out_destributed, dim_sizes);
+    contract_distributed_c(left_destributed, right_destributed, out_destributed, dim_sizes);
 
     MPI_Barrier(MPI_COMM_WORLD);
     tp1 = std::chrono::steady_clock::now();
@@ -446,7 +433,7 @@ void benchmark() {
 
       MPI_Waitall(num_ranks - 1, reqs, MPI_STATUSES_IGNORE);
 
-      l_ten_out2 = at::cat(out_mpi, ten_split_out_dim).contiguous();
+      l_ten_out2 = at::cat(out_mpi, 2).contiguous();
 
       if (at::allclose(l_ten_out, l_ten_out2)) {
         std::cout << "success" << std::endl;
