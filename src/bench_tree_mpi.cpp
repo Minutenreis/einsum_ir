@@ -152,7 +152,7 @@ datatype *getOffset(datatype *data, int rank, int num_ranks, int64_t chunk_size,
 }
 
 // expects outer most dimension of out and right to be an "n" dimension and divisible by 2 * num_ranks
-void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<int64_t, int64_t> dim_sizes) {
+void contract_distributed_k_old(Tensor &left, Tensor &right, Tensor &out, std::map<int64_t, int64_t> dim_sizes) {
   einsum_ir::backend::BinaryContractionTpp bin_cont;
 
   int num_ranks;
@@ -240,6 +240,77 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
   delete[] send_buffer;
   delete[] calc_buffer;
   delete[] recv_buffer;
+}
+
+// expects outer most dimension of out and right to be an "n" dimension and divisible by num_ranks
+void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<int64_t, int64_t> dim_sizes) {
+  einsum_ir::backend::BinaryContractionTpp bin_cont;
+
+  int num_ranks;
+  MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
+
+  int rank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+  int previous = (rank - 1 + num_ranks) % num_ranks;
+  int next = (rank + 1) % num_ranks;
+
+  auto chunk_dim = out.dim_ids[0];
+
+  // outer most dimension has to be the same
+  assert(out.dim_ids[0] == right.dim_ids[0]);
+  // the outer most dimension has to be "n"
+  assert(std::find(left.dim_ids.begin(), left.dim_ids.end(), chunk_dim) == left.dim_ids.end());
+  // the outer most dimension has to be divisible by num_ranks
+  assert(dim_sizes[chunk_dim] % num_ranks == 0);
+
+  dim_sizes[chunk_dim] /= num_ranks;
+
+  bin_cont.init(left.dim_ids.size(), right.dim_ids.size(), out.dim_ids.size(),
+                &dim_sizes, &dim_sizes, &dim_sizes, nullptr, &dim_sizes,
+                left.dim_ids.data(), right.dim_ids.data(), out.dim_ids.data(),
+                datatypeEinsum, datatypeEinsum, datatypeEinsum, datatypeEinsum,
+                einsum_ir::ZERO, einsum_ir::MADD, einsum_ir::UNDEFINED_KTYPE);
+
+  bin_cont.compile();
+  bin_cont.threading(omp_get_max_threads() * 4);
+
+  int64_t chunk_size_right = right.size / num_ranks;
+
+  datatype *new_buffer_left = new datatype[left.size];
+  datatype *new_buffer_right = new datatype[right.size];
+
+  datatype *calc_buffer_left = left.data;
+  datatype *recv_buffer_left = new_buffer_left;
+
+  datatype *calc_buffer_right = right.data;
+  datatype *recv_buffer_right = new_buffer_right;
+
+  MPI_Request reqs[4];
+#pragma omp parallel num_threads(2)
+  {
+    for (int i = 0; i < num_ranks - 1; i++) {
+      if (omp_get_thread_num() == 0) {
+        MPI_Isend(calc_buffer_left, left.size, datatypeMPI, previous, 0, MPI_COMM_WORLD, &reqs[0]);
+        MPI_Isend(calc_buffer_right, right.size, datatypeMPI, previous, 1, MPI_COMM_WORLD, &reqs[1]);
+        MPI_Irecv(recv_buffer_left, left.size, datatypeMPI, next, 0, MPI_COMM_WORLD, &reqs[2]);
+        MPI_Irecv(recv_buffer_right, right.size, datatypeMPI, next, 1, MPI_COMM_WORLD, &reqs[3]);
+        MPI_Waitall(4, reqs, MPI_STATUSES_IGNORE);
+      } else {
+        bin_cont.contract(calc_buffer_left, calc_buffer_right + rank * chunk_size_right, out.data);
+      }
+      // might need barrier here?
+#pragma omp single
+      {
+        std::swap(calc_buffer_left, recv_buffer_left);
+        std::swap(calc_buffer_right, recv_buffer_right);
+      }
+    }
+  }
+  bin_cont.contract(calc_buffer_left, calc_buffer_right + rank * chunk_size_right, out.data);
+
+  delete[] new_buffer_right;
+  delete[] new_buffer_left;
 }
 
 void benchmark() {
@@ -468,6 +539,8 @@ void benchmark() {
       }
 
       MPI_Waitall(num_ranks - 1, reqs, MPI_STATUSES_IGNORE);
+
+      auto split_ten_out = at::chunk(l_ten_out, num_ranks, ten_split_out_dim);
 
       l_ten_out2 = at::cat(out_mpi, ten_split_out_dim).contiguous();
 
