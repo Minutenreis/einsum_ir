@@ -185,11 +185,12 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
   dim_sizes[chunk_dim_n] /= num_ranks;
   dim_sizes[chunk_dim_m] /= 2;
 
+  // i_k_type_first_touch -> zero = 0 initialisation, undefined = no initialisation (taken as is)
   bin_cont.init(left.dim_ids.size(), right.dim_ids.size(), out.dim_ids.size(),
                 &dim_sizes, &dim_sizes, &dim_sizes, nullptr, &dim_sizes,
                 left.dim_ids.data(), right.dim_ids.data(), out.dim_ids.data(),
                 datatypeEinsum, datatypeEinsum, datatypeEinsum, datatypeEinsum,
-                einsum_ir::ZERO, einsum_ir::MADD, einsum_ir::UNDEFINED_KTYPE);
+                einsum_ir::UNDEFINED_KTYPE, einsum_ir::MADD, einsum_ir::UNDEFINED_KTYPE);
 
   bin_cont.compile();
   bin_cont.threading(omp_get_max_threads() * 4);
