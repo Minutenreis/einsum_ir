@@ -152,7 +152,7 @@ datatype *getOffset(datatype *data, int rank, int num_ranks, int64_t chunk_size,
 }
 
 // expects outer most dimension of out and right to be an "n" dimension and divisible by 2 * num_ranks
-void contract_distributed_k_old(Tensor &left, Tensor &right, Tensor &out, std::map<int64_t, int64_t> dim_sizes) {
+void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<int64_t, int64_t> dim_sizes) {
   einsum_ir::backend::BinaryContractionTpp bin_cont;
 
   int num_ranks;
@@ -169,7 +169,7 @@ void contract_distributed_k_old(Tensor &left, Tensor &right, Tensor &out, std::m
   assert(out.dim_ids[0] == right.dim_ids[0]);          // outer most dimension has to be the same (and "n")
   assert(dim_sizes[chunk_dim] % (2 * num_ranks) == 0); // the distributed dimension has to be divisible by 2 * num_ranks
 
-  dim_sizes[chunk_dim] = dim_sizes[chunk_dim] / (2 * num_ranks);
+  dim_sizes[chunk_dim] /= (2 * num_ranks);
 
   bin_cont.init(left.dim_ids.size(), right.dim_ids.size(), out.dim_ids.size(),
                 &dim_sizes, &dim_sizes, &dim_sizes, nullptr, &dim_sizes,
@@ -183,9 +183,11 @@ void contract_distributed_k_old(Tensor &left, Tensor &right, Tensor &out, std::m
   int64_t buffer_size = out.size / 2;
   int64_t chunk_size_right = right.size / (2 * num_ranks);
 
-  datatype *send_buffer = new datatype[buffer_size]{};
-  datatype *calc_buffer = new datatype[buffer_size]{};
-  datatype *recv_buffer = new datatype[buffer_size]{};
+  datatype *new_buffer = new datatype[buffer_size]{};
+
+  datatype *send_buffer = out.data;
+  datatype *calc_buffer = out.data + buffer_size;
+  datatype *recv_buffer = new_buffer;
 
   /**
    * at the end send_buffer has to be out.data and calc_buffer has to be out.data + buffer_size
@@ -203,6 +205,8 @@ void contract_distributed_k_old(Tensor &left, Tensor &right, Tensor &out, std::m
 
   MPI_Request reqs[2];
   bin_cont.contract(left.data, getOffset(right.data, rank, num_ranks, chunk_size_right, 0), calc_buffer);
+
+  // rotate buffers
   datatype *tmp = send_buffer;
   send_buffer = calc_buffer;
   calc_buffer = recv_buffer;
@@ -231,19 +235,12 @@ void contract_distributed_k_old(Tensor &left, Tensor &right, Tensor &out, std::m
   }
   bin_cont.contract(left.data, getOffset(right.data, rank, num_ranks, chunk_size_right, num_ranks * 2 - 1), calc_buffer);
 
-  // not needed if we can assume out.data to be 0 initialized
-  for (int i = 0; i < buffer_size; i++) {
-    out.data[i] += send_buffer[i];
-    out.data[i + buffer_size] += calc_buffer[i];
-  }
-
-  delete[] send_buffer;
-  delete[] calc_buffer;
-  delete[] recv_buffer;
+  delete[] new_buffer;
 }
 
 // expects outer most dimension of out and right to be an "n" dimension and divisible by num_ranks
-void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<int64_t, int64_t> dim_sizes) {
+// NOT WORKING
+void contract_distributed_k_new(Tensor &left, Tensor &right, Tensor &out, std::map<int64_t, int64_t> dim_sizes) {
   einsum_ir::backend::BinaryContractionTpp bin_cont;
 
   int num_ranks;
@@ -551,6 +548,7 @@ void benchmark() {
         std::cout << "  speedup:       " << dur.count() / dur_mpi.count() << std::endl;
       } else {
         std::cout << "failure" << std::endl;
+        std::cout << "  max diff: " << (l_ten_out - l_ten_out2).abs().max().item<datatype>() << std::endl;
       }
     } else {
       MPI_Send(out_destributed.data, out_destributed.size, datatypeMPI, 0, 0, MPI_COMM_WORLD);
@@ -567,6 +565,8 @@ int main() {
   MPI_Init_thread(NULL, NULL, MPI_THREAD_SERIALIZED, &provided);
 
   omp_set_nested(true); // allow multiple nested parallel regions
+
+  at::set_default_dtype(caffe2::TypeMeta::Make<datatype>()); // set default datatype
 
   benchmark();
 
