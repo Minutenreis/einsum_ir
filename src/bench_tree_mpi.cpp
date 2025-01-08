@@ -147,11 +147,16 @@ void contract_distributed_m_n_out_m(Tensor &left, Tensor &right, Tensor &out, st
   delete[] new_buffer;
 }
 
-datatype *getOffset(datatype *data, int rank, int num_ranks, int64_t chunk_size, int64_t step) {
-  return data + (((rank + 1) * 2 + step) % (2 * num_ranks)) * chunk_size;
+datatype *getOffsetRight(datatype *data, int rank, int num_ranks, int64_t chunk_size, int64_t step) {
+  return data + ((rank + 1 + step / 2) % num_ranks) * chunk_size;
 }
 
-// expects outer most dimension of out and right to be an "n" dimension and divisible by 2 * num_ranks
+datatype *getOffsetLeft(datatype *data, int64_t chunk_size, int64_t step) {
+  return data + (step % 2) * chunk_size;
+}
+
+// expects outer most dimension of right to be an "n" dimension and divisible by num_ranks
+// expects outer most dimension of out and left to be an "m" dimension and divisible 2
 void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<int64_t, int64_t> dim_sizes) {
   einsum_ir::backend::BinaryContractionTpp bin_cont;
 
@@ -164,12 +169,21 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
   int previous = (rank - 1 + num_ranks) % num_ranks;
   int next = (rank + 1) % num_ranks;
 
-  auto chunk_dim = out.dim_ids[0];
+  auto chunk_dim_n = right.dim_ids[0];
+  auto chunk_dim_m = left.dim_ids[0];
+  // outer most dimension of left and out has to be the same (and "m")
+  assert(out.dim_ids[0] == left.dim_ids[0]);
+  // the distributed dimension of right and out has to be divisible by num_ranks
+  assert(dim_sizes[chunk_dim_n] % num_ranks == 0);
+  // the distributed dimension of left has to be divisible by 2
+  assert(dim_sizes[chunk_dim_m] % 2 == 0);
+  // the outer most dimension of right has to be "n"
+  assert(std::find(left.dim_ids.begin(), left.dim_ids.end(), chunk_dim_n) == left.dim_ids.end());
+  // the outer most dimension of left and out has to be "m"
+  assert(std::find(right.dim_ids.begin(), right.dim_ids.end(), chunk_dim_m) == right.dim_ids.end());
 
-  assert(out.dim_ids[0] == right.dim_ids[0]);          // outer most dimension has to be the same (and "n")
-  assert(dim_sizes[chunk_dim] % (2 * num_ranks) == 0); // the distributed dimension has to be divisible by 2 * num_ranks
-
-  dim_sizes[chunk_dim] /= (2 * num_ranks);
+  dim_sizes[chunk_dim_n] /= num_ranks;
+  dim_sizes[chunk_dim_m] /= 2;
 
   bin_cont.init(left.dim_ids.size(), right.dim_ids.size(), out.dim_ids.size(),
                 &dim_sizes, &dim_sizes, &dim_sizes, nullptr, &dim_sizes,
@@ -181,7 +195,8 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
   bin_cont.threading(omp_get_max_threads() * 4);
 
   int64_t buffer_size = out.size / 2;
-  int64_t chunk_size_right = right.size / (2 * num_ranks);
+  int64_t chunk_size_right = right.size / num_ranks;
+  int64_t chunk_size_left = left.size / 2;
 
   datatype *new_buffer = new datatype[buffer_size]{};
 
@@ -204,7 +219,10 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
   }
 
   MPI_Request reqs[2];
-  bin_cont.contract(left.data, getOffset(right.data, rank, num_ranks, chunk_size_right, 0), calc_buffer);
+  bin_cont.contract(
+      getOffsetLeft(left.data, chunk_size_left, 0),
+      getOffsetRight(right.data, rank, num_ranks, chunk_size_right, 0),
+      calc_buffer);
 
   // rotate buffers
   datatype *tmp = send_buffer;
@@ -220,7 +238,10 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
         MPI_Irecv(recv_buffer, buffer_size, datatypeMPI, next, 0, MPI_COMM_WORLD, &reqs[1]);
         MPI_Waitall(2, reqs, MPI_STATUSES_IGNORE);
       } else {
-        bin_cont.contract(left.data, getOffset(right.data, rank, num_ranks, chunk_size_right, i), calc_buffer);
+        bin_cont.contract(
+            getOffsetLeft(left.data, chunk_size_left, i),
+            getOffsetRight(right.data, rank, num_ranks, chunk_size_right, i),
+            calc_buffer);
       }
 // might need barrier here?
 #pragma omp single
@@ -233,81 +254,12 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
       }
     }
   }
-  bin_cont.contract(left.data, getOffset(right.data, rank, num_ranks, chunk_size_right, num_ranks * 2 - 1), calc_buffer);
+  bin_cont.contract(
+      getOffsetLeft(left.data, chunk_size_left, num_ranks * 2 - 1),
+      getOffsetRight(right.data, rank, num_ranks, chunk_size_right, num_ranks * 2 - 1),
+      calc_buffer);
 
   delete[] new_buffer;
-}
-
-// expects outer most dimension of out and right to be an "n" dimension and divisible by num_ranks
-// NOT WORKING
-void contract_distributed_k_new(Tensor &left, Tensor &right, Tensor &out, std::map<int64_t, int64_t> dim_sizes) {
-  einsum_ir::backend::BinaryContractionTpp bin_cont;
-
-  int num_ranks;
-  MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
-
-  int rank;
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-
-  int previous = (rank - 1 + num_ranks) % num_ranks;
-  int next = (rank + 1) % num_ranks;
-
-  auto chunk_dim = out.dim_ids[0];
-
-  // outer most dimension has to be the same
-  assert(out.dim_ids[0] == right.dim_ids[0]);
-  // the outer most dimension has to be "n"
-  assert(std::find(left.dim_ids.begin(), left.dim_ids.end(), chunk_dim) == left.dim_ids.end());
-  // the outer most dimension has to be divisible by num_ranks
-  assert(dim_sizes[chunk_dim] % num_ranks == 0);
-
-  dim_sizes[chunk_dim] /= num_ranks;
-
-  bin_cont.init(left.dim_ids.size(), right.dim_ids.size(), out.dim_ids.size(),
-                &dim_sizes, &dim_sizes, &dim_sizes, nullptr, &dim_sizes,
-                left.dim_ids.data(), right.dim_ids.data(), out.dim_ids.data(),
-                datatypeEinsum, datatypeEinsum, datatypeEinsum, datatypeEinsum,
-                einsum_ir::ZERO, einsum_ir::MADD, einsum_ir::UNDEFINED_KTYPE);
-
-  bin_cont.compile();
-  bin_cont.threading(omp_get_max_threads() * 4);
-
-  int64_t chunk_size_right = right.size / num_ranks;
-
-  datatype *new_buffer_left = new datatype[left.size];
-  datatype *new_buffer_right = new datatype[right.size];
-
-  datatype *calc_buffer_left = left.data;
-  datatype *recv_buffer_left = new_buffer_left;
-
-  datatype *calc_buffer_right = right.data;
-  datatype *recv_buffer_right = new_buffer_right;
-
-  MPI_Request reqs[4];
-#pragma omp parallel num_threads(2)
-  {
-    for (int i = 0; i < num_ranks - 1; i++) {
-      if (omp_get_thread_num() == 0) {
-        MPI_Isend(calc_buffer_left, left.size, datatypeMPI, previous, 0, MPI_COMM_WORLD, &reqs[0]);
-        MPI_Isend(calc_buffer_right, right.size, datatypeMPI, previous, 1, MPI_COMM_WORLD, &reqs[1]);
-        MPI_Irecv(recv_buffer_left, left.size, datatypeMPI, next, 0, MPI_COMM_WORLD, &reqs[2]);
-        MPI_Irecv(recv_buffer_right, right.size, datatypeMPI, next, 1, MPI_COMM_WORLD, &reqs[3]);
-        MPI_Waitall(4, reqs, MPI_STATUSES_IGNORE);
-      } else {
-        bin_cont.contract(calc_buffer_left, calc_buffer_right + rank * chunk_size_right, out.data);
-      }
-      // might need barrier here?
-#pragma omp single
-      {
-        std::swap(calc_buffer_left, recv_buffer_left);
-        std::swap(calc_buffer_right, recv_buffer_right);
-      }
-    }
-  }
-  bin_cont.contract(calc_buffer_left, calc_buffer_right + rank * chunk_size_right, out.data);
-
-  delete[] new_buffer_right;
-  delete[] new_buffer_left;
 }
 
 void benchmark() {
@@ -360,9 +312,9 @@ void benchmark() {
   l_dim_sizes.insert(std::pair<int64_t, int64_t>(k1, l_size_k1));
   l_dim_sizes.insert(std::pair<int64_t, int64_t>(k2, l_size_k2));
 
-  std::vector<int64_t> l_dim_ids_in_left({c0, m0, k0, k1, k2, m1});
+  std::vector<int64_t> l_dim_ids_in_left({m0, c0, k0, k1, k2, m1});
   std::vector<int64_t> l_dim_ids_in_right({n0, c0, k0, k1, n1, k2});
-  std::vector<int64_t> l_dim_ids_out({n0, c0, m0, n1, m1});
+  std::vector<int64_t> l_dim_ids_out({m0, n0, c0, n1, m1});
 
   at::Tensor l_ten_left;
   at::Tensor l_ten_right;
@@ -394,8 +346,8 @@ void benchmark() {
                                      l_size_k1, // 4
                                      l_size_k2, // 5
                                  })
-                     //        c0 m0 k0 k1 k2 m1
-                     .permute({0, 1, 3, 4, 5, 2})
+                     //        m0 c0 k0 k1 k2 m1
+                     .permute({1, 0, 3, 4, 5, 2})
                      .contiguous();
 
     l_ten_right = l_ten_right.view({
@@ -417,8 +369,8 @@ void benchmark() {
                                    l_size_m0, // 3
                                    l_size_m1, // 4
                                })
-                    //        n0 c0 m0 n1 m1
-                    .permute({1, 0, 3, 4, 2})
+                    //        m0 n0 c0 n1 m1
+                    .permute({3, 1, 0, 4, 2})
                     .contiguous();
 
     left = {l_dim_ids_in_left, l_size_left, l_ten_left.data_ptr<datatype>()};
