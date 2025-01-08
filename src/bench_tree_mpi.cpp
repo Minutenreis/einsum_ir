@@ -470,10 +470,13 @@ void benchmark() {
       MPI_Waitall(2, reqs, MPI_STATUSES_IGNORE);
     }
 
+    // for time measurement
+    MPI_Barrier(MPI_COMM_WORLD);
     tp0 = std::chrono::steady_clock::now();
     // contract
     contract_distributed_k(left_destributed, right_destributed, out_destributed, dim_sizes);
 
+    // for time measurement
     MPI_Barrier(MPI_COMM_WORLD);
     tp1 = std::chrono::steady_clock::now();
     dur_mpi = std::chrono::duration_cast<std::chrono::duration<double>>(tp1 - tp0);
@@ -488,8 +491,6 @@ void benchmark() {
       }
 
       MPI_Waitall(num_ranks - 1, reqs, MPI_STATUSES_IGNORE);
-
-      auto split_ten_out = at::chunk(l_ten_out, num_ranks, ten_split_out_dim);
 
       l_ten_out2 = at::cat(out_mpi, ten_split_out_dim).contiguous();
 
