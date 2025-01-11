@@ -34,22 +34,40 @@ This work proposes 3 algorithms for the following scenarios:
 \subsection{distributed c dimension algorithm}
 
 \begin{figure}[h]
-\centering\includegraphics[width=0.5\textwidth]{dist_c.pdf}
-\caption{Visualization of the distributed c algorithm; each color represents one Node with the coloured blocks representing the data they hold; if the tensors are distributed along a c dimension no communication has to occur and each Node just contracts its local input tensors (left and top) to generate its chunk of the output tensor}
+\centering\includegraphics[width=0.3\textwidth]{dist_c.pdf}
+\caption{Visualization of the distributed c algorithm; 
+each color represents one node with the coloured blocks representing the data they hold; 
+if the tensors are distributed along a c dimension no communication has to occur and each node just contracts its local input tensors to generate its chunk of the output tensor}
 \label{fig:c_algo}
 \end{figure}
 
-Distribution along the c dimension is the simplest algorithm we consider. 
-Since all c dimensions are independent of each other, no communication has to occur between the Nodes.
+Distribution along a c dimension is the simplest algorithm we consider. 
+Since all c dimensions are independent of each other, no communication has to occur between the nodes.
 Each node will locally contract its chunks of the input tensors.
 The resulting output tensor is thereby distributed along the same dimension as its input tensors were.
+This algorithm represents the optimal case for distribution, as no communication overhead can occur.
 
 \subsection{distributed m/n dimensions algorithm}
 
 \begin{figure}[h]
-\centering\includegraphics[width=1\textwidth]{dist_m_n_out_m.pdf}
-\caption{Visualization of the distributed m/n algorithm; each color represents one Node with the coloured blocks representing the data they hold; if the tensors are distributed along their respective m/n dimensions one of the input tensors has to be communicated between all nodes. Each Node will calculate a chunk of their output tensor while receiving the next input tensor thats needed (visualized with arrows in the colour of the receiving node). The output tensor is distributed along the distributed input dimension thats not communicated.}
+\includegraphics[width=0.79\textwidth]{dist_m_n_out_m.pdf}
+\includegraphics[width=0.2\textwidth]{ring.pdf}
+\caption{Visualization of the distributed m/n algorithm; 
+each color represents one node with the coloured blocks representing the data they hold; 
+if the tensors are distributed along their respective m/n dimensions the right tensor will be communicated between all nodes. 
+Each node will calculate a chunk of their output tensor while receiving the next input tensor thats needed (visualized with arrows in the colour of the receiving node). 
+The right figure shows the nodes setup as ring, where each node may only communicate with their respective next and previous node.}
 \label{fig:m_n_algo}
 \end{figure}
 
-test
+For the communication of this algorithm we assume that all nodes are set up in a ring as seen in the right part of Figure \ref{fig:m_n_algo}.
+If both input tensors are distributed alongside their m/n dimensions, communication between nodes is unavoidable.
+In contrast to being distributed along their c dimension, each node can only calculate a $\frac{1}{n^2}$ big chunk of the output tensor locally, where n is the number of nodes employed in the distributed contraction.
+Each node needs to end up with a $\frac{1}{n}$ big chunk of the output tensor.
+This algorithm achieves this by doing $n$ contractions, where the first $n-1$ contractions are overlapped by each node communicating its currently being contracted right tensor to the previous node in the ring.
+In each step $\frac{1}{n}$'th of each nodes chunk of the output tensor is calculated.
+Due to a limitation in the contraction interface of the current application, the outer most dimension of the output tensor has to be the distributed dimension of the right tensor, as the interface expects input and output tensors to be contiguous in memory.
+This limitation could be circumvented by inputting not just the tensors but also their strides into the interface.
+In the rest of this thesis that limitation will be disregarded.
+This algorithm only has a communication overhead if the time to send and receive one chunk of the right tensor is larger than the time to contract one such chunk with its chunk of the left tensor.
+In the implementation of this algorithm we also need enough additional memory to hold one extra chunk of the right tensor, so each node can simultaneously contract the current right chunk and receive the next chunk.
