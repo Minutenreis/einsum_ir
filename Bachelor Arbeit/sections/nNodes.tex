@@ -1,4 +1,55 @@
-
 \section{Scaling across arbitrary number of Nodes}
 
-This is a sample sentence. Todo: Remove.
+The previously discussed Master-Worker algorithms expect all the data before and after a contraction to reside within 1 node.
+For large tensors this is no longer feasable, as scratch memory on a node is limited and using main storage is prohibitively slow.
+The communication load is also very unbalanced for more than 2 nodes, where the master has to communicate with all other nodes while each node only has to communicate with the master.
+To circumvent all these problems the next algorithms will keep the data distributed in the whole contraction.
+This needs both less memory on each node and allows very balanced communication loads.
+
+As basis for the following algorithms we make a few assumptions:
+\begin{enumerate}
+    \item tensors are predistributed across all nodes 
+    \item gathering the result tensor is not needed
+    \item tensors are sufficiently large and compute intensive that data communication will not be the bottle neck
+    \item tensors can be split evenly across ranks
+\end{enumerate}
+
+To justify point 1 and 2 we consider our examples as part of a larger Einsumtree that gets contracted.
+If the tree is large enough, the initial distribution and the final gatherering of tensors will be negligble compared to the total runtime.
+If point 3 is not met the tree should be run on less nodes.
+If the tree is sufficiently small just one node and no distributed memory parallelism whatsoever might be better suited towards the problem.
+Point 4 is assumed so the algorithms can be described in a simpler manner.
+If the system proposed is to be deployed as more than just this proof of concept, one could remedy that requirement by zero padding input tensors or adjusting the algorithms to work on two sizes of each tensor instead (one for the fully filled chunks and one for the partial chunks).
+
+With these assumptions met the main goal for the algorithms will be to increase throughput as much as possible.
+To achieve that each node has to compute ideally the entire runtime of a contraction, which necessitates overlapping communication and computation (should communication occur).
+The following algorithms will employ an extra communication thread to achieve this overlap.
+This work proposes 3 algorithms for the following scenarios:
+\begin{enumerate}
+    \item in both input tensors the same c dimension is split
+    \item in both input tensors a m/n dimension is split
+    \item in both input tensors the same k dimension is split and one tensors outer most dimension is m/n
+\end{enumerate}
+
+\subsection{distributed c dimension algorithm}
+
+\begin{figure}[h]
+\centering\includegraphics[width=0.5\textwidth]{dist_c.pdf}
+\caption{Visualization of the distributed c algorithm; each color represents one Node with the coloured blocks representing the data they hold; if the tensors are distributed along a c dimension no communication has to occur and each Node just contracts its local input tensors (left and top) to generate its chunk of the output tensor}
+\label{fig:c_algo}
+\end{figure}
+
+Distribution along the c dimension is the simplest algorithm we consider. 
+Since all c dimensions are independent of each other, no communication has to occur between the Nodes.
+Each node will locally contract its chunks of the input tensors.
+The resulting output tensor is thereby distributed along the same dimension as its input tensors were.
+
+\subsection{distributed m/n dimensions algorithm}
+
+\begin{figure}[h]
+\centering\includegraphics[width=1\textwidth]{dist_m_n_out_m.pdf}
+\caption{Visualization of the distributed m/n algorithm; each color represents one Node with the coloured blocks representing the data they hold; if the tensors are distributed along their respective m/n dimensions one of the input tensors has to be communicated between all nodes. Each Node will calculate a chunk of their output tensor while receiving the next input tensor thats needed (visualized with arrows in the colour of the receiving node). The output tensor is distributed along the distributed input dimension thats not communicated.}
+\label{fig:m_n_algo}
+\end{figure}
+
+test
