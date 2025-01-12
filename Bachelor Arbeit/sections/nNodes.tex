@@ -37,26 +37,30 @@ This work proposes 3 algorithms for the following scenarios:
 \centering\includegraphics[width=0.3\textwidth]{dist_c.pdf}
 \caption{Visualization of the distributed c algorithm; 
 each color represents one node with the coloured blocks representing the data they hold; 
-if the tensors are distributed along a c dimension no communication has to occur and each node just contracts its local input tensors to generate its chunk of the output tensor}
+since the tensors are distributed along their c dimension, each node can locally contract its chunks to generate their chunk of the output tensor}
 \label{fig:c_algo}
 \end{figure}
 
 Distribution along a c dimension is the simplest algorithm we consider. 
-Since all c dimensions are independent of each other, no communication has to occur between the nodes.
-Each node will locally contract its chunks of the input tensors.
-The resulting output tensor is thereby distributed along the same dimension as its input tensors were.
-This algorithm represents the optimal case for distribution, as no communication overhead can occur.
+As seen in Figure \ref{fig:c_algo} we assume both input tensors are distributed along the same c dimension.
+We also generally expect all distributions to follow the same order within ranks, meaning that rank 0 always keeps the first chunk, rank 1 the second and so on.
+If now both input chunks are contracted on each node, the result will be a chunk of the output tensor distributed along the same c dimension.
+At least locally this is optimal, since all nodes have the same workload and no additional communication has to occur.
+As long as a tensor can be split among all nodes, this algorithm is preferable to the non distributed case.
 
 \subsection{distributed m/n dimensions algorithm}
 
 \begin{figure}[h]
-\includegraphics[width=0.79\textwidth]{dist_m_n_out_m.pdf}
+\includegraphics[width=0.78\textwidth]{dist_m_n_out_m.pdf}
 \includegraphics[width=0.2\textwidth]{ring.pdf}
 \caption{Visualization of the distributed m/n algorithm; 
 each color represents one node with the coloured blocks representing the data they hold; 
-if the tensors are distributed along their respective m/n dimensions the right tensor will be communicated between all nodes. 
-Each node will calculate a chunk of their output tensor while receiving the next input tensor thats needed (visualized with arrows in the colour of the receiving node). 
-The right figure shows the nodes setup as ring, where each node may only communicate with their respective next and previous node.}
+since the tensors are split along their m/n dimensions each node can only locally contract $\frac{1}{totalNodes}$th part of the output tensor.
+To generate a full chunk of the output tensor, each node contracts its current right tensor with their left tensor while simultaneously sending it to their previous neighbour in the ring and receiving their next right tensor from their next neighbour.
+In the visualization this is described with arrows originating on the communicated chunk and coloured with its recipient.
+The ring communication used is depicted on the right, where each node can only communicate with its immediate neighbours.
+After $totalNodes$ steps this will result in an output tensor that is distributed along the same dimension as the left tensor.
+}
 \label{fig:m_n_algo}
 \end{figure}
 
@@ -71,3 +75,13 @@ This limitation could be circumvented by inputting not just the tensors but also
 In the rest of this thesis that limitation will be disregarded.
 This algorithm only has a communication overhead if the time to send and receive one chunk of the right tensor is larger than the time to contract one such chunk with its chunk of the left tensor.
 In the implementation of this algorithm we also need enough additional memory to hold one extra chunk of the right tensor, so each node can simultaneously contract the current right chunk and receive the next chunk.
+
+%todo: describe algorithm in greater detail
+%todo: explain why ring algorithm was chosen (what the alternative would have been, why ring algorithm reduces additional memory)
+%todo: explain that the last swap was not used (and hence the input tensors are filled with arbitrary other part of the input tensor) and that fulfilling it would still need an extra local copy to retrieve starting condition (thats not needed since we expect to work on trees and not DAG's)
+%todo: describe that swapping children alleviates the need for a second algorithm with split n output
+%todo: explain that individual contracts are tried to keep as big as possible
+%todo: write why interleaving multiple timesteps was not explored (time constraints, would help if nodes have irregular breaks for example)
+%todo: where should I describe why I implement tensor parallelism instead of pipeline parallelism (not suited if tree is relatively flat) or "tree" parallelism (not suited if tree is relatively deep)
+%todo: use einsum notation somewhere (?)
+%todo: should I describe here why I only expect 1 dimension to be split (1 split into 4 instead of 2 into 2 each for example)
