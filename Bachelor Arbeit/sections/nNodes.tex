@@ -1,12 +1,12 @@
-\section{Scaling across arbitrary number of Nodes}
+\section{Scaling across an arbitrary Number of Nodes}
 
 The previously discussed Master-Worker algorithms expect all the data before and after a contraction to reside within 1 node.
-For large tensors this is no longer feasable, as scratch memory on a node is limited and using main storage is prohibitively slow.
-The communication load is also very unbalanced for more than 2 nodes, where the master has to communicate with all other nodes while each node only has to communicate with the master.
+For large tensors this is no longer feasible, as scratch memory on a node is limited and using main storage is prohibitively slow.
+The communication load is also very unbalanced for more than 2 nodes, where the master must communicate with all other nodes while each node only has to communicate with the master.
 To circumvent all these problems the next algorithms will keep the data distributed in the whole contraction.
 This needs both less memory on each node and allows very balanced communication loads.
 
-As basis for the following algorithms we make a few assumptions:
+As basis for the following algorithms, we make a few assumptions:
 \begin{enumerate}
     \item tensors are predistributed across all nodes 
     \item gathering the result tensor is not needed
@@ -14,16 +14,16 @@ As basis for the following algorithms we make a few assumptions:
     \item tensors can be split evenly across ranks
 \end{enumerate}
 
-To justify point 1 and 2 we consider our examples as part of a larger Einsumtree that gets contracted.
-If the tree is large enough, the initial distribution and the final gatherering of tensors will be negligble compared to the total runtime.
+To justify point 1 and 2 we consider our examples as part of a larger einsum tree that gets contracted.
+If the tree is large enough, the initial distribution and the final gathering of tensors will be negligible compared to the total runtime.
 If point 3 is not met the tree should be run on less nodes.
 If the tree is sufficiently small just one node and no distributed memory parallelism whatsoever might be better suited towards the problem.
 Point 4 is assumed so the algorithms can be described in a simpler manner.
 If the system proposed is to be deployed as more than just this proof of concept, one could remedy that requirement by zero padding input tensors or adjusting the algorithms to work on two sizes of each tensor instead (one for the fully filled chunks and one for the partial chunks).
 
 With these assumptions met the main goal for the algorithms will be to increase throughput as much as possible.
-To achieve that each node has to compute ideally the entire runtime of a contraction, which necessitates overlapping communication and computation (should communication occur).
-The following algorithms will employ an extra communication thread to achieve this overlap.
+To achieve that each node ideally computes the entire runtime of a contraction, which necessitates overlapping communication and computation (should communication occur).
+The following algorithms will employ an extra communication thread, to achieve this overlap.
 This work proposes 3 algorithms for the following scenarios:
 \begin{enumerate}
     \item in both input tensors the same c dimension is split
@@ -31,12 +31,12 @@ This work proposes 3 algorithms for the following scenarios:
     \item in both input tensors the same k dimension is split and one tensors outer most dimension is m/n
 \end{enumerate}
 
-\subsection{distributed c dimension algorithm}
+\subsection{Distributed c-dimension Algorithm}
 
-\begin{figure}[h]
+\begin{figure}[ht]
 \centering\includegraphics[width=0.3\textwidth]{dist_c.pdf}
 \caption{Visualization of the distributed c algorithm; 
-each color represents one node with the coloured blocks representing the data they hold; 
+each colour represents one node with the coloured blocks representing the data they hold; 
 since the tensors are distributed along their c dimension, each node can locally contract its chunks to generate their chunk of the output tensor}
 \label{fig:c_algo}
 \end{figure}
@@ -45,22 +45,21 @@ Distribution along a c dimension is the simplest algorithm we consider.
 As seen in Figure \ref{fig:c_algo} we assume both input tensors are distributed along the same c dimension.
 We also generally expect all distributions to follow the same order within ranks, meaning that rank 0 always keeps the first chunk, rank 1 the second and so on.
 If now both input chunks are contracted on each node, the result will be a chunk of the output tensor distributed along the same c dimension.
-At least locally this is optimal, since all nodes have the same workload and no additional communication has to occur.
-As long as a tensor can be split among all nodes, this algorithm is preferable to the non distributed case.
+This algorithm is preferable where applicable since it does not need any communication between nodes.
 
-\subsection{distributed m/n dimensions algorithm}
+\subsection{Distributed m/n-dimensions Algorithm}
 
-\begin{figure}[h]
+\begin{figure}[ht]
 \centering{
 \includegraphics[width=0.75\textwidth]{dist_m_n.pdf}
 \includegraphics[width=0.2\textwidth]{ring.pdf}
 }
 \caption{Visualization of the distributed m/n algorithm; 
-each color represents one node with the coloured blocks representing the data they hold; 
+each colour represents one node with the coloured blocks representing the data they hold; 
 since the tensors are split along their m/n dimensions each node can only locally contract $\frac{1}{totalNodes}$th part of the output tensor.
 To generate a full chunk of the output tensor, each node contracts its current right tensor with their left tensor while simultaneously sending it to their previous neighbour in the ring and receiving their next right tensor from their next neighbour.
 After $totalNodes$ iterations this will result in an output tensor that is distributed along the same dimension as the left tensor.
-In the data movement is visualized with arrows of each nodes color pointing to the next right tensor they receive.
+In the data movement is visualized with arrows of each nodes colour pointing to the next right tensor they receive.
 The ring communication used is depicted on the right, where each node can only communicate with its immediate neighbours.
 }
 \label{fig:m_n_algo}
@@ -76,7 +75,7 @@ While each node contracts its first chunk, they also each send their currently c
 To achieve that each node will use an extra communication thread so the communication gets overlapped with the contraction and allocate an extra buffer for the receiving tensor to go into.
 After each step the receiving and calculating tensors switch their functions.
 After $totalNodes$ iterations each node has one chunk of the output tensor that is distributed along the same dimension as the left input tensor.
-As long as the time to communicate one chunk of the right tensor is not greater than the time to contract one subchunk, this will hide all communication times from the final contraction time.
+While the time to communicate one chunk of the right tensor is smaller than the time to contract one subchunk, all communication times are overlapping with the computation.
 
 At this point a few design considerations should be noted:\\
 \textbf{The implemented algorithm omits communicating tensors in the last iteration.}
@@ -88,33 +87,32 @@ Should the algorithm be adjusted to also work for DAG's this last communication 
 Should an uneven number of nodes be employed that last step would also need to be followed by a local copy from the allocated buffer to the original input tensor.\\
 \textbf{Ring communication is chosen to reduce additional memory needed.}
 If alternatively each node keeps its input tensors to send to each other node directly, it would need another 2 buffers, one for the currently contracted tensor (except in the first iteration where it already has that buffer in the form of the input tensor) and another for the tensor it currently receives.
-The size of these buffers could be reduced by chosing a smaller subchunk size, but that would involve more smaller MPI packages and smaller contractions, both of which are worse for performance.
-Also the size of the buffers in the ring algorithm could be reduced in a similar manner and still require only half of the additional memory for the same subchunk size.\\
+The size of these buffers could be reduced by choosing a smaller subchunk size, but that would involve more smaller MPI packages and smaller contractions, both of which are worse for performance.
+The size of the buffers in the ring algorithm could be reduced in a similar manner and still require only half of the additional memory for the same subchunk size.\\
 \textbf{Due to a limitation in the current contraction interface, the distributed dimension of the right tensor has to be the outermost dimension of the output tensor.}
 This is necessary since the current interface supports only the contractions of two contiguous chunks of memory into a third contiguous chunk.
 To divide the output tensor into $totalNodes$ many contiguous chunks the split dimension of the subchunks needs to be the outer most dimension.
 This limitation could be remedied by expanding the contraction interface to support strided input / output tensors.
 Since the remedy is simple the limitation will be ignored in the rest of this thesis.
 For time reasons this expansion of the interface was not explored.\\
-\textbf{A seperate algorithm for keeping the distributed dimension of the right tensor is not needed.}
-This algorithm would work completely analogously to the m/n algorithm depicted, but communicate the left tensor across nodes instead.
+\textbf{A arate algorithm for keeping the distributed dimension of the right tensor is not needed.}
+This algorithm would work completely analogously to the m/n algorithm depicted but communicate the left tensor across nodes instead.
 To achieve the same result the two contracted tensors may be swapped in the tree without any restriction, which achieves the same result.
-
 
 %todo: write why interleaving multiple timesteps was not explored (time constraints, would help if nodes have irregular breaks for example)
 %todo: where should I describe why I implement tensor parallelism instead of pipeline parallelism (not suited if tree is relatively flat) or "tree" parallelism (not suited if tree is relatively deep)
 %todo: use einsum notation somewhere (?)
 %todo: should I describe here why I only expect 1 dimension to be split (1 split into 4 instead of 2 into 2 each for example)
 
-\subsection{distributed k dimension algorithm}
+\subsection{Distributed k-dimension Algorithm}
 
-\begin{figure}[h]
+\begin{figure}[ht]
     \centering{
     \includegraphics[width=0.5\textwidth]{dist_k.pdf}
     \includegraphics[width=0.34\textwidth]{dist_k_memory.pdf}
     }
     \caption{Visualization of the distributed k algorithm; 
-    each color represents one node with the coloured blocks representing the data they hold; 
+    each colour represents one node with the coloured blocks representing the data they hold; 
     In contrast to the m/n algorithm in Figure \ref{fig:m_n_algo}, this algorithm moves the output tensor through the nodes.
     The left graphic depicts the data movement from the perspective of rank 0 for 4 nodes.
     It starts with the chunk of the next rank and then linearly adds its part of the contraction to each, ending with its own chunk of the output tensor, at which point the contraction completes.
@@ -125,4 +123,45 @@ To achieve the same result the two contracted tensors may be swapped in the tree
     }
     \label{fig:k_algo}
 \end{figure}
+
+For the communication of this algorithm we once again assume a ring like setup like the distributed m/n-dimension one.
+We assume that both input tensors are distributed along the same k dimension and that the outer most dimension of the left tensor is the same as that of the output tensor.
+In contrast to the m/n-dimension algorithm each node can no longer calculate one full subchunk of the output tensor.
+Instead, each node can calculate a part of all output chunks with its local inputs.
+So instead of communicating one of the input tensors, the nodes communicate their output tensors.
+Since the k dimension is no longer in the output we can choose an arbitrary dimension to distribute the output tensors on, in Figure \ref{fig:k_algo} we split the output tensor along an n dimension.
+Since each node should end up with its own corresponding output tensor chunk, they will each start contracting the chunk of their next neighbour in the ring.
+Then after each contraction they will send the contracted tensor to their previous neighbour.
+That way after all contractions they will each end up with their corresponding chunk.
+To overlap communication and computation a tensor in this case can't be simultaneously calculated on and received or sent.
+To circumvent this problem, we also split the left and output tensor along their outermost dimension in 2 parts to generate 2 subchunks.
+Now in each step the second half of an output tensor chunk can be computed while the first part already gets sent.
+With now in total $2 \cdot totalNodes$ chunks to calculate the algorithm takes an equal number of steps.
+In each step the previous result gets sent to the previous node in the ring, while the current subchunk gets calculated and the next chunk loaded from the next node in the ring.
+The only exception to that is the first and last step, where in the first step there are no tensors yet to be communicated and in the last step the results are already in the right places.
+An example for all timesteps for rank 0 in a 4 node ring is depicted in Figure \ref{fig:k_algo}.
+
+In total we need three subchunks on each node to execute the algorithm.
+We use the output tensor to store two of them and allocate an additional temporary tensor for the third one.
+The chunks will start in either of the positions depicted on the right of Figure \ref{fig:k_algo}.
+To determine the starting position the last two steps in the algorithm have to be looked at.
+The last step should calculate the bottom part of the output tensor (so bottom left) and the second to last step should calculate the top part of the output tensor (so bottom right).
+After each step the 3 subchunks "rotate" functions.
+The last calculated subchunk gets sent out next, the last sent subchunk is now free to receive new data and the last receive chunk now has to be contracted on.
+After 3 iterations all subchunks have the same function.
+With that in mind we can calculate the starting position of all chunks with a simple modulo calculation, since we know the end position and the number of "rotations" that happen.
+
+A few design considerations should be noted again:\\
+\textbf{Due to a limitation in the current contraction interface, the distributed dimension of the output has to be the outermost dimension of its input tensor.}
+To be able to split the input tensor into subchunks to contract individually, the outer most dimension has to be split.
+As with the m/n-algorithm this could be solved by supporting strided input in the interface.
+For this reason, this limitation will be ignored in the rest of the thesis.\\
+\textbf{The distributed dimension of the output tensor may be the same as the split dimension for the subchunks, provided its the outermost dimension.}
+In this case the dimension just has to be divisible by $2 \cdot totalNodes$ instead.\\
+\textbf{If the outer most dimension of the output should not be split, it would take double the amount of additional memory.}
+Assuming the interface supported strided input, it would still need a full output chunk of memory to store it in instead of only half a chunk it needs if the outer most dimension is split.\\
+\textbf{Ring communication is chosen to reduce additional memory needed.}
+If alternatively each node kept its output tensor and only send updates to each respective output tensor, it would once again need enough additional memory to keep 2 such updates at the same time (one that gets calculated and one that gets sent to the respective node).
+It would also need to call a reduction on the node where the update gets sent to, using more compute resources than the ring algorithm.
+
 
