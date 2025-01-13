@@ -155,6 +155,13 @@ datatype *getOffsetLeft(datatype *data, int64_t chunk_size, int64_t step) {
   return data + (step % 2) * chunk_size;
 }
 
+void rotate(datatype *&send_buffer, datatype *&calc_buffer, datatype *&recv_buffer) {
+  datatype *tmp = send_buffer;
+  send_buffer = calc_buffer;
+  calc_buffer = recv_buffer;
+  recv_buffer = tmp;
+}
+
 // expects outer most dimension of right to be an "n" dimension and divisible by num_ranks
 // expects outer most dimension of out and left to be an "m" dimension and divisible 2
 void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<int64_t, int64_t> dim_sizes) {
@@ -213,10 +220,7 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
    * -> prerotate buffers so the data is in the right place at the end
    */
   for (int i = 0; i < (num_ranks + 1) % 3; i++) {
-    datatype *tmp = send_buffer;
-    send_buffer = calc_buffer;
-    calc_buffer = recv_buffer;
-    recv_buffer = tmp;
+    rotate(send_buffer, calc_buffer, recv_buffer);
   }
 
   MPI_Request reqs[2];
@@ -225,11 +229,7 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
       getOffsetRight(right.data, rank, num_ranks, chunk_size_right, 0),
       calc_buffer);
 
-  // rotate buffers
-  datatype *tmp = send_buffer;
-  send_buffer = calc_buffer;
-  calc_buffer = recv_buffer;
-  recv_buffer = tmp;
+  rotate(send_buffer, calc_buffer, recv_buffer);
 
 #pragma omp parallel num_threads(2)
   {
@@ -246,13 +246,7 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
       }
 // might need barrier here?
 #pragma omp single
-      {
-        // rotate buffers
-        tmp = send_buffer;
-        send_buffer = calc_buffer;
-        calc_buffer = recv_buffer;
-        recv_buffer = tmp;
-      }
+      rotate(send_buffer, calc_buffer, recv_buffer);
     }
   }
   bin_cont.contract(
