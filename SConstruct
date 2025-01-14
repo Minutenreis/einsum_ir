@@ -214,8 +214,10 @@ if( g_env['libxsmm'] and g_env['libtorch'] ):
 g_env.Program( g_env['build_dir']+'/tests',
                source = g_env.tests )
 
-g_env["CXX"] = "/usr/bin/mpicxx"
+# if "mpi" in g_env["CXX"]:
+g_env["CXX"] = "/home/justus/mpich/bin/mpicxx" # set path to own mpicxx compiler
 g_env.Program( g_env['build_dir']+'/bench_binary_mpi',
                  source = g_env.sources + g_env.exe['bench_binary_mpi'] )
 g_env.Program( g_env['build_dir']+'/bench_tree_mpi',
                   source = g_env.sources + g_env.exe['bench_tree_mpi'] )
+g_env.AppendUnique(CXXFLAGS = [("-mcpu=neoverse-v2")]) # set to target architecture

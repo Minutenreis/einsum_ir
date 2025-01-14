@@ -257,26 +257,25 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
   delete[] new_buffer;
 }
 
-void benchmark() {
+void benchmark(int64_t size_1, int64_t size_2) {
   std::chrono::steady_clock::time_point tp0, tp1;
   std::chrono::duration<double> dur, dur_mpi;
 
-  const int64_t l_size_c0 = 4;
+  const int64_t l_size_c0 = 2;
 
-  const int64_t l_size_m0 = 32;
-  const int64_t l_size_m1 = 32;
+  const int64_t l_size_m0 = size_1;
+  const int64_t l_size_m1 = size_2;
 
-  const int64_t l_size_n0 = 32;
-  const int64_t l_size_n1 = 96;
+  const int64_t l_size_n0 = size_2;
+  const int64_t l_size_n1 = size_2;
 
-  const int64_t l_size_k0 = 16;
-  const int64_t l_size_k1 = 16;
-  const int64_t l_size_k2 = 32;
+  const int64_t l_size_k0 = size_1;
+  const int64_t l_size_k1 = size_1;
 
   const int64_t l_size_c = l_size_c0;
   const int64_t l_size_m = l_size_m0 * l_size_m1;
   const int64_t l_size_n = l_size_n0 * l_size_n1;
-  const int64_t l_size_k = l_size_k0 * l_size_k1 * l_size_k2;
+  const int64_t l_size_k = l_size_k0 * l_size_k1;
 
   const int64_t l_size_total = l_size_c * l_size_m * l_size_n * l_size_k;
   const int64_t l_size_left = l_size_c * l_size_m * l_size_k;
@@ -292,7 +291,6 @@ void benchmark() {
   int n1 = 4;
   int k0 = 5;
   int k1 = 6;
-  int k2 = 7;
 
   std::map<int64_t, int64_t> l_dim_sizes;
   l_dim_sizes.insert(std::pair<int64_t, int64_t>(c0, l_size_c0));
@@ -305,10 +303,9 @@ void benchmark() {
 
   l_dim_sizes.insert(std::pair<int64_t, int64_t>(k0, l_size_k0));
   l_dim_sizes.insert(std::pair<int64_t, int64_t>(k1, l_size_k1));
-  l_dim_sizes.insert(std::pair<int64_t, int64_t>(k2, l_size_k2));
 
-  std::vector<int64_t> l_dim_ids_in_left({m0, c0, k0, k1, k2, m1});
-  std::vector<int64_t> l_dim_ids_in_right({n0, c0, k0, k1, n1, k2});
+  std::vector<int64_t> l_dim_ids_in_left({m0, c0, k0, k1, m1});
+  std::vector<int64_t> l_dim_ids_in_right({n0, c0, k0, n1, k1});
   std::vector<int64_t> l_dim_ids_out({m0, n0, c0, n1, m1});
 
   at::Tensor l_ten_left;
@@ -327,7 +324,7 @@ void benchmark() {
   MPI_Comm_size(MPI_COMM_WORLD, &num_ranks);
 
   if (rank == 0) {
-    std::cout << "einsum_ir:" << std::endl;
+    // std::cout << "einsum_ir:" << std::endl;
 
     l_ten_left = at::rand({l_size_c, l_size_k, l_size_m});
     l_ten_right = at::rand({l_size_c, l_size_n, l_size_k});
@@ -339,10 +336,9 @@ void benchmark() {
                                      l_size_m1, // 2
                                      l_size_k0, // 3
                                      l_size_k1, // 4
-                                     l_size_k2, // 5
                                  })
-                     //        m0 c0 k0 k1 k2 m1
-                     .permute({1, 0, 3, 4, 5, 2})
+                     //        m0 c0 k0 k1 m1
+                     .permute({1, 0, 3, 4, 2})
                      .contiguous();
 
     l_ten_right = l_ten_right.view({
@@ -351,10 +347,9 @@ void benchmark() {
                                        l_size_n1, // 2
                                        l_size_k0, // 3
                                        l_size_k1, // 4
-                                       l_size_k2, // 5
                                    })
-                      //        n0 c0 k0 k1 n1 k2
-                      .permute({1, 0, 3, 4, 2, 5})
+                      //        n0 c0 k0 n1 k1
+                      .permute({1, 0, 3, 2, 4})
                       .contiguous();
 
     l_ten_out = l_ten_out.view({
@@ -380,11 +375,11 @@ void benchmark() {
                   datatypeEinsum, datatypeEinsum, datatypeEinsum, datatypeEinsum,
                   einsum_ir::ZERO, einsum_ir::MADD, einsum_ir::UNDEFINED_KTYPE);
 
-    std::cout << "  compile" << std::endl;
+    // std::cout << "  compile" << std::endl;
     bin_cont.compile();
     bin_cont.threading(omp_get_max_threads() * 4);
 
-    std::cout << "  contract" << std::endl;
+    // std::cout << "  contract" << std::endl;
 
     bin_cont.contract(left.data, right.data, out.data);
     tp1 = std::chrono::steady_clock::now();
@@ -408,10 +403,11 @@ void benchmark() {
 
     int einsum_split_left_dim = k0;
     int einsum_split_right_dim = k0;
-    int einsum_split_out_dim = n0;
+    int einsum_split_out_dim = m0;
 
     auto dim_sizes = l_dim_sizes;
     dim_sizes[k0] /= num_ranks;
+
     int ten_split_left_dim, ten_split_right_dim, ten_split_out_dim;
 
     // predistribute data
@@ -424,9 +420,9 @@ void benchmark() {
       it = std::find(out.dim_ids.begin(), out.dim_ids.end(), einsum_split_out_dim);
       ten_split_out_dim = std::distance(out.dim_ids.begin(), it);
 
-      std::cout << "einsum_ir_mpi:" << std::endl;
+      // std::cout << "einsum_ir_mpi:" << std::endl;
 
-      std::cout << "  scatter" << std::endl;
+      // std::cout << "  scatter" << std::endl;
 
       l_ten_out2 = at::zeros_like(l_ten_out);
 
@@ -452,7 +448,7 @@ void benchmark() {
 
       MPI_Waitall(2 * (num_ranks - 1), reqs, MPI_STATUSES_IGNORE);
 
-      std::cout << "  contract" << std::endl;
+      // std::cout << "  contract" << std::endl;
     } else {
       left_destributed = {l_dim_ids_in_left, chunk_size_left, new datatype[chunk_size_left]};
       right_destributed = {l_dim_ids_in_right, chunk_size_right, new datatype[chunk_size_right]};
@@ -478,7 +474,7 @@ void benchmark() {
 
     // gather data and cleanup
     if (rank == 0) {
-      std::cout << "  gather" << std::endl;
+      // std::cout << "  gather" << std::endl;
 
       MPI_Request reqs[num_ranks - 1];
       for (int i = 1; i < num_ranks; i++) {
@@ -489,15 +485,10 @@ void benchmark() {
 
       l_ten_out2 = at::cat(out_mpi, ten_split_out_dim).contiguous();
 
-      if (at::allclose(l_ten_out, l_ten_out2)) {
-        std::cout << "success" << std::endl;
-        std::cout << "  einsum_ir:     " << dur.count() << "s" << std::endl;
-        std::cout << "  einsum_ir_mpi: " << dur_mpi.count() << "s" << std::endl;
-        std::cout << "  speedup:       " << dur.count() / dur_mpi.count() << std::endl;
-      } else {
-        std::cout << "failure" << std::endl;
-        std::cout << "  max diff: " << (l_ten_out - l_ten_out2).abs().max().item<datatype>() << std::endl;
-      }
+      auto l_gflops = 1.0E-9 * l_n_flops / dur.count();
+      auto l_gflops_mpi = 1.0E-9 * l_n_flops / dur_mpi.count();
+
+      std::cout << size_1 << ", " << l_gflops << ", " << l_gflops_mpi << ", " << l_gflops_mpi / l_gflops << std::endl; // size_1
     } else {
       MPI_Send(out_destributed.data, out_destributed.size, datatypeMPI, 0, 0, MPI_COMM_WORLD);
 
@@ -508,7 +499,8 @@ void benchmark() {
   }
 }
 
-int main() {
+int main(int argc, char const *argv[]) {
+
   int provided;
   MPI_Init_thread(NULL, NULL, MPI_THREAD_SERIALIZED, &provided);
 
@@ -516,7 +508,16 @@ int main() {
 
   at::set_default_dtype(caffe2::TypeMeta::Make<datatype>()); // set default datatype
 
-  benchmark();
+  if (argc != 2 && argc != 3) {
+    benchmark(96, 86);
+  } else if (argc == 2) {
+    int size_1 = atoi(argv[1]);
+    benchmark(size_1, 86);
+  } else if (argc == 3) {
+    int size_1 = atoi(argv[1]);
+    int size_2 = atoi(argv[2]);
+    benchmark(size_1, size_2);
+  }
 
   MPI_Finalize();
 

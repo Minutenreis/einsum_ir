@@ -35,7 +35,7 @@ if [ -z "${num_cores}" ]; then
 fi
 
 # default values
-einsum_ir_exe="${einsum_ir_exe:-einsum_ir/build/bench_expression}"
+einsum_ir_exe="${einsum_ir_exe:-build/bench_expression}"
 log_dir="${log_dir:-logs}"
 enable_ht="${enable_ht:-0}"
 selected_keys="${selected_keys:-all}"
