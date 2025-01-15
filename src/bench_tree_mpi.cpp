@@ -401,12 +401,13 @@ void benchmark(int64_t size_1, int64_t size_2) {
     std::vector<at::Tensor> right_mpi;
     std::vector<at::Tensor> out_mpi;
 
-    int einsum_split_left_dim = k0;
-    int einsum_split_right_dim = k0;
-    int einsum_split_out_dim = m0;
+    int einsum_split_left_dim = m0;
+    int einsum_split_right_dim = n0;
+    int einsum_split_out_dim = n0;
 
     auto dim_sizes = l_dim_sizes;
-    dim_sizes[k0] /= num_ranks;
+    dim_sizes[m0] /= num_ranks;
+    dim_sizes[n0] /= num_ranks;
 
     int ten_split_left_dim, ten_split_right_dim, ten_split_out_dim;
 
@@ -465,7 +466,7 @@ void benchmark(int64_t size_1, int64_t size_2) {
     MPI_Barrier(MPI_COMM_WORLD);
     tp0 = std::chrono::steady_clock::now();
     // contract
-    contract_distributed_k(left_destributed, right_destributed, out_destributed, dim_sizes);
+    contract_distributed_m_n_out_n(left_destributed, right_destributed, out_destributed, dim_sizes);
 
     // for time measurement
     MPI_Barrier(MPI_COMM_WORLD);
