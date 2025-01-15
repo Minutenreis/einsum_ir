@@ -266,11 +266,11 @@ void benchmark(int64_t size_1, int64_t size_2) {
   const int64_t l_size_m0 = size_1;
   const int64_t l_size_m1 = size_2;
 
-  const int64_t l_size_n0 = size_2;
+  const int64_t l_size_n0 = size_1;
   const int64_t l_size_n1 = size_2;
 
   const int64_t l_size_k0 = size_1;
-  const int64_t l_size_k1 = size_1;
+  const int64_t l_size_k1 = size_2;
 
   const int64_t l_size_c = l_size_c0;
   const int64_t l_size_m = l_size_m0 * l_size_m1;

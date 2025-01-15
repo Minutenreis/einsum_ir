@@ -33,11 +33,17 @@ m0 = k0 = k1 = size_1, m1 = n0 = n1 = size_2 = 70, c0 = 2
 dist_k_X2.csv
 
 -----
-the following 3 data sets were run with `bash grace_tree_test_100.sh`
+the following 6 data sets were run with `bash grace_tree_test_100.sh`
 
 dist_k_100.csv
 dist_c_100.csv
+dist_m_n_100.csv
 
+m0 = n0 = k0 = size_1, m1 = n1 = k1 = size_2 = 70, c0 = 2
+
+dist_m_n_100b.csv
+dist_c_100b.csv
+dist_k_100b.csv
 
 the next used the following contraction [c0,m0,k0,k1,m1],[c0,n0,k0,n1,k1]->[c0,m0,n0,n1,m1]
 Visualization: https://seriousseal.github.io/bachelor_gui/?e=H4sIAAAAAAAAA1OKTjbQyTXQyQYiQ51cw1gdkEAeWCDPECgWq2sHVZIHFgEqUQIA%2Bo9uujUAAAA%3D&s=H4sIAAAAAAAAA6tWSjZQsjLSUcqFUHlQyhAiCKGyIYLZIF4tAHEYn9IyAAAA
