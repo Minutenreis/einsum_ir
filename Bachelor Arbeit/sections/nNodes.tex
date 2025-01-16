@@ -3,11 +3,11 @@
 The previously discussed master-worker algorithm expects all input tensors before and the output tensor after a contraction to reside within a single master node.
 Imagine we now have $p$ nodes (this notation for the number of nodes will hold true throughout this chapter).
 The master node is now involved in sending and receiving $\frac{p-1}{p}$ parts of the tensors in the contraction.
-Meanwhile the worker nodes each only communicate $\frac{1}{p}$ part of the tensors with the master.
+Meanwhile, the worker nodes each only communicate $\frac{1}{p}$ part of the tensors with the master.
 The larger $p$ gets the more unbalanced communication in the master-worker algorithm gets.
-It also might run into memory issues should the total size of all tensors exceed the master nodes memory size.
+It also might run into memory issues should the total size of all tensors exceed the master nodes' memory size.
 
-Instead let us consider algorithms that work on distributed tensors as input and output.
+Instead, let us consider algorithms that work on distributed tensors as input and output.
 Such algorithms allow the communication load to be balanced across all nodes.
 
 As basis for such an algorithm, we make the following assumptions:
@@ -51,10 +51,10 @@ Since the contractions $\forall i \in p: A_i, B_i \rightarrow C_i$ are independe
     \label{m_n_pseudocode}
 \end{algorithm}
 
-If a tensor contraction $A,B \rightarrow C$ shares a dimension between one input tensor and the output tensor, but not the second input tensor, we will call it a m dimension if its included in the left input tensor and a n dimension if its included in the right one.
-Imagine $A$ and $C$ share a m dimension $m_0$ and $B$ and $C$ share a n dimension $n_0$.
+If a tensor contraction $A,B \rightarrow C$ shares a dimension between one input tensor and the output tensor, but not the second input tensor, we will call it an m dimension if it is included in the left input tensor and an n dimension if it is included in the right one.
+Imagine $A$ and $C$ share an m dimension $m_0$ and $B$ and $C$ share an n dimension $n_0$.
 Contracting an expression $A,B \rightarrow C$ is then the same as splitting $A$ along $m_0$ into $p$ chunks $A_0\dots A_{p-1}$ and $B$ along $n_0$ into $p$ chunks $B_0\dots B_{p-1}$.
-We can imagine $C$ then as the concatination of $C_0\dots C_p$ chunks split along the $m_0$ dimension and $C_i$ for $0 \leq i \leq p$ as the concatination of $C_{i,0} \dots C_{i,p}$ along $n_0$.
+We can imagine $C$ then as the concatenation of $C_0\dots C_p$ chunks split along the $m_0$ dimension and $C_i$ for $0 \leq i \leq p$ as the concatenation of $C_{i,0} \dots C_{i,p}$ along $n_0$.
 We can compute each $C_{i,j}$ as $A_i,B_j \rightarrow C_{i,j}$.
 To calculate a chunk $C_i$ a process needs all of $A$.
 Instead of executing an \texttt{allgather} on $A$ we will calculate $C_i$ stepwise.
