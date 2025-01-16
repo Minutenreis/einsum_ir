@@ -1,0 +1,1 @@
+OMP_NUM_THREADS=$1 ./build/bench_binary "cefd,aebf->abcd" "96,84,84,84,84,96" FP32
