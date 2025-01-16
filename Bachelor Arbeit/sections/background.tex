@@ -20,10 +20,21 @@ The evaluation of einsum expression is supported in the popular frameworks Torch
 
 \subsection{einsum\_ir}
 
-\texttt{einsum\_ir}\cite{einsum_ir} is a software library developed at the Friedrich Schiller University to accelerate a series of einsum expressions in C++.
+\begin{figure}[ht]
+  \centering{\includegraphics[width=0.95\textwidth]{gflops_threads.png}}
+  \caption{
+    Performance of existing einsum\_ir on an Nvidia Grace CPU superchip.
+    Grace consists of 2 72-core cpus connected with NVLink.
+  }
+  \label{fig:perf_threads}
+\end{figure}
+
+\texttt{einsum\_ir}\cite{einsum_ir} is a software library developed at the Friedrich Schiller University Jena to accelerate a series of einsum expressions in C++.
+It takes an einsum tree as input and evaluates its root recursively.
 My work will build on top of the existing work done in this library.
 Specifically I will use their implementation of a binary tensor contraction $A,B \rightarrow C$ as local primitive for my algorithm.
 \texttt{einsum\_ir} already implements shared memory parallelisation with OpenMP\cite{openMP}, so it can already exploit all cpu cores on a single NUMA domain.
-Its performance is currently not scaling well across more than one cpu. %todo: cite or test?
+Its performance is currently not scaling well across more than one cpu, as seen in Figure \ref{fig:perf_threads}.
+The performance drops as soon as the threads of the second cpu get used, as seen in the sharp decline after 72 threads.
 This thesis provides algorithms aimed at a secondary distributed memory parallelization to alleviate that issue.
 An important note for the current binary tensor contraction interface is that it expects all tensors, both input and output, to be contiguous in memory.
