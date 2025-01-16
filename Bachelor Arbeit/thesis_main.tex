@@ -12,6 +12,7 @@
 % for code
 \usepackage{algorithm}
 \usepackage{algpseudocode}
+\usepackage{mathtools}
 \renewcommand{\algorithmicrequire}{\textbf{Input:}}
 \renewcommand{\algorithmicensure}{\textbf{Output:}}
 
@@ -23,11 +24,12 @@
 \usepackage{pdfpages}
 
 %language
-\usepackage[main=english,ngerman]{babel}
+\usepackage[main=UKenglish,ngerman]{babel}
 \usepackage{csquotes}
 
 %paragraph spacing
 \usepackage{parskip}
+\usepackage{hyperref}
 
 
 %bibliography stuff
@@ -58,7 +60,7 @@
 %\doublespacing
 
 
-%\begin{titlepage}
+\begin{titlepage}
     \begin{center}
         \includegraphics*[]{logo}
     \end{center}
@@ -103,11 +105,8 @@
         advisor: Prof. Dr. A. Breuer \\
         Jena, 23.1.2025
     \end{center}
-
-
-
     
-%\end{titlepage}
+\end{titlepage}
 \newpage
 
 
@@ -141,6 +140,8 @@
 
 %\renewcommand{\thepage}{}
 \printbibliography
+
+\input{sections/appendix.tex}
 
 \newpage
 \thispagestyle{empty} 

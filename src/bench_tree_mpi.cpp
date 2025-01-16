@@ -19,10 +19,6 @@ struct Tensor {
   datatype *data;               // pointer to data
 };
 
-/**
- * IMPORTANT: After each function call, the data of the input tensor is arbitrary.
- */
-
 // expect dim_sizes to be fitting the distributed tensor and not the original
 void contract_distributed_c(Tensor &left, Tensor &right, Tensor &out, std::map<int64_t, int64_t> dim_sizes) {
   einsum_ir::backend::BinaryContractionTpp bin_cont;
