@@ -25,6 +25,16 @@ With those assumptions we will conceive three algorithms:
 
 \subsection{Distributed c Dimension}
 
+\begin{algorithm}[h]
+    \begin{algorithmic}
+    \Require $i = \texttt{mpi\_rank}, A_i, B_i$
+    \Ensure $C_i$
+    \State $A_i, B_i \rightarrow C_i$
+\end{algorithmic}
+\caption{Distributed c contraction}
+\label{c_pseudocode}
+\end{algorithm}
+
 If a tensor contraction $A,B \rightarrow C$ shares a dimension between all three tensors, we will call it a c dimension.
 Imagine $A$,$B$ and $C$ share such a c dimension $c_0$
 Contracting such an expression is the same as splitting $A$ and $B$ alongside $c_0$ into $p$ equal chunks $A_0\dots A_{p-1}, B_0\dots B_{p-1}$, contracting the chunks $A_i, B_i \rightarrow C_i$ and then concatenating the $p$ chunks of $C_i$ at $c_0$ dimension to $C$.
@@ -37,28 +47,29 @@ Since the contractions $\forall i \in p: A_i, B_i \rightarrow C_i$ are independe
         \Require $i = \texttt{mpi\_rank}, A_i, B_i$
         \Ensure $C_i$
         \State $\texttt{next} = (i+1) \mod p$
-        \State $\texttt{prev} = |(i-1) \mod p|$
+        \State $\texttt{prev} = (i+p-1) \mod p$
         \State $\texttt{comp\_buffer} \gets B_i$
-        \State  $\text{for } j \text{ in } 0\dots p \text{ do:}$
+        \State  $\text{for } j \text{ in } 0\dots p - 1 \text{ do:}$
         \State \indent $k \gets (i + j) \mod p$
         \State \indent \text{do in parallel:}
         \State \indent \indent $A_i, \texttt{comp\_buffer} \rightarrow C_{i,j}$
         \State \indent \indent $\texttt{mpi\_recv recv\_buffer from next}$
         \State \indent \indent $\texttt{mpi\_send comp\_buffer to prev}$
+        \State \indent $\texttt{comp\_buffer} \gets \texttt{recv\_buffer}$
         \State $C_i \gets \texttt{concat}(C_{i,0}\dots C_{i,p})$
     \end{algorithmic}
-    \caption{Distributed m/n contract pseudocode}
+    \caption{Distributed m/n contraction}
     \label{m_n_pseudocode}
 \end{algorithm}
 
-If a tensor contraction $A,B \rightarrow C$ shares a dimension between one input tensor and the output tensor, but not the second input tensor, we will call it an m dimension if it is included in the left input tensor and an n dimension if it is included in the right one.
+If a tensor contraction $A,B \rightarrow C$ shares a dimension between one input tensor and the output tensor, but not the second input tensor, we will call it an m dimension if it is included in $A$ and an n dimension if it is included in $B$.
 Imagine $A$ and $C$ share an m dimension $m_0$ and $B$ and $C$ share an n dimension $n_0$.
 Contracting an expression $A,B \rightarrow C$ is then the same as splitting $A$ along $m_0$ into $p$ chunks $A_0\dots A_{p-1}$ and $B$ along $n_0$ into $p$ chunks $B_0\dots B_{p-1}$.
 We can imagine $C$ then as the concatenation of $C_0\dots C_p$ chunks split along the $m_0$ dimension and $C_i$ for $0 \leq i \leq p$ as the concatenation of $C_{i,0} \dots C_{i,p}$ along $n_0$.
 We can compute each $C_{i,j}$ as $A_i,B_j \rightarrow C_{i,j}$.
 To calculate a chunk $C_i$ a process needs all of $A$.
 Instead of executing an \texttt{allgather} on $A$ we will calculate $C_i$ stepwise.
-In each step each node will contract one part $C_{i,j}$ of $C_I$ as $A_i,B_j \rightarrow C_{i,j}$.
+In each step each node will contract one part $C_{i,j}$ of $C_i$ as $A_i,B_j \rightarrow C_{i,j}$.
 Simultaneously each node will get a new chunk $B_{j+1}$ from their neighbour with a higher rank in a ring, so the node with the highest rank gets its chunk from the node with rank 0.
 To enable both the contraction and the communication of the new chunk to occur simultaneously each node needs extra memory with the size of one chunk of $B$.
 Since we assume all tensors to be predistributed, each node will begin with its diagonal part $C_{i,i}$ where i equals the rank of the node.
@@ -71,3 +82,69 @@ So for the implementations we have to assume that $n_0$ is the outermost dimensi
 
 We could also consider another very similar algorithm where each node gets a chunk $A_i$ in each iteration instead of $B_j$.
 Such an algorithm is omitted here, since the same effect can be achieved by swapping the input tensors as $A' \coloneqq B$ and $B' \coloneqq A$, which results in $A',B' \rightarrow C$.
+
+The algorithm employs a ring-like communication pattern to reduce memory usage.
+Instead of moving all the tensors in each time step, one could imagine an algorithm where each node keeps its input tensor chunks $B_i$ and sends them directly to whichever node needs them.
+That comes with the problem of still needing one tensor to contract on and another to handle the communication at the same time.
+Since the initial tensor $B_i$ may no longer be moved now, this takes an additional buffer of size $|B_i|$.
+
+\subsection{Distributed k Dimension}
+
+
+\begin{algorithm}
+    \begin{algorithmic}
+        \Require $\texttt{send\_buffer},\texttt{comp\_buffer},\texttt{recv\_buffer}$
+        \Ensure $\texttt{send\_buffer},\texttt{comp\_buffer},\texttt{recv\_buffer}$
+        \State $\texttt{temp} \gets {send\_buffer}$
+        \State $\texttt{send\_buffer} \gets {comp\_buffer}$
+        \State $\texttt{comp\_buffer} \gets {recv\_buffer}$
+        \State $\texttt{recv\_buffer} \gets {temp}$
+    \end{algorithmic}
+    \caption{rotate}
+    \label{rotate_pseudocode}
+\end{algorithm}
+
+\begin{algorithm}[h]
+
+    \begin{algorithmic}
+    \Require $i = \texttt{mpi\_rank}, A_i, B_i, j$
+    \Ensure $C_i$
+    \State $\texttt{next} = (i+1) \mod p$
+    \State $\texttt{prev} = (i+p-1) \mod p$
+    \State $\texttt{send\_buffer} \gets \texttt{firstHalf}(C_i)$
+    \State $\texttt{comp\_buffer} \gets \texttt{secondHalf}(C_i)$
+    \State $\texttt{recv\_buffer} \gets \texttt{new memory}$
+    \State $\text{repeat } (p+1) \mod 3 \text{ times} \texttt{ //last contraction on secondHalf}(C_i)$ 
+    \State \indent $\texttt{rotate}(\texttt{send\_buffer},\texttt{comp\_buffer},\texttt{recv\_buffer})$
+    \State $A_{i,0}, B_{i,next} \texttt{comp\_buffer}$
+    \State  $\text{for } j \text{ in } 0\dots 2 * p - 1 \text{ do:}$
+    \State \indent $ k = j \mod 2 $
+    \State \indent $ m = (i + 1 + \frac{j}{2}) \mod p$
+    \State \indent \text{do in parallel:}
+    \State \indent \indent $A_{i,k}, B_{i,m} \rightarrow \texttt{comp\_buffer}$
+    \State \indent \indent $\texttt{mpi\_recv recv\_buffer from next}$
+    \State \indent \indent $\texttt{mpi\_send send\_buffer to prev}$
+    \State \indent $\texttt{rotate}(\texttt{send\_buffer},\texttt{comp\_buffer},\texttt{recv\_buffer})$
+    \State $A_{i,1}, B_{i,i} \rightarrow \texttt{comp\_buffer}$
+
+\end{algorithmic}
+\caption{Distributed k contraction}
+\label{k_pseudocode}
+\end{algorithm}
+
+If a tensor contraction $A,B \rightarrow C$ shares a dimension between both input tensor, but not in the output tensor, we will call it a k dimension.
+Imagine $A$ and $B$ share a k dimension $k_0$.
+Contracting an expression $A,B \rightarrow C$ is the same as splitting $A$ and $B$ along $k_0$ into p chunks $A_0\dots A_{p-1}$ and $B_0\dots B_{p-1}$.
+If we define $C_i$ as the result from $A_i,B_i \rightarrow C_i$, $C=\sum{C_i}$.
+To receive a distributed output tensor we would have to split $C$ into $p$ chunks $C_0\dots C_{p-1}$ again.
+Instead of first computing the whole of C on each node, we can compute partial sums of the output tensors $C_j$, where 
+$C_j = \sum_{i=0}^{p-1} C_{i,j}$.
+Each node $j$ can compute all updates $C_{0,j}\dots C_{p-1,j}$.
+To end each node on its chunk $C_j$ we imagine each node adding its partial sum $C_{i,j}$ to an existing partial sum of $C_i$ and then communicating this partial sum to its previous neighbour $j+p-1 \mod p$.
+If each node starts adding upon $C_{j+1}$, it will end up with $C_j$ after all nodes have added all partial sums to $C_j$.
+This $C_j$ may be split across any arbitrary dimension.
+
+If we want to overlap communication and computation in an implementation we have to slightly adjust the algorithm.
+If we compute partial updates on all of $C_j$ each node has to wait communicating the partial updates until the computation is done.
+Instead, each node should compute half of $C_j$ and already communicate that part while it computes the second half of the partial updates upon it.
+Doing this we can continuously contract on each node.
