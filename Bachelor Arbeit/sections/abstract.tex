@@ -2,14 +2,21 @@
 
 \section*{Abstract}
 
-This will surely one time be a great abstract. 
-But until then take this placeholder Text.
+Einsum expressions are a succinct and declarative way to express tensor contractions as $A,B \rightarrow C$.
+Einsum trees describe a series of such expressions.
+%todo: cite einsum_ir
+\texttt{einsum\_ir} \cite{einsum_ir} is a library to compute einsum trees efficiently on single compute units.
+This thesis proposes three algorithms to accelerate the \texttt{einsum\_ir} with distributed memory parallelism.
+In testings only one of the algorithms showcased significant performance improvements, while the other two at best matched \texttt{einsum\_ir}'s performance despite using twice as many compute resources.
 
 %\newpage
 \thispagestyle{empty} 
 
 \begin{otherlanguage}{ngerman}
 \section*{Kurzfassung}
-Dies wird mal eine wunderbare Kurzfassung sein.
-In der Zwischenzeit nehmet diesen Platzhalter Text.
+Einsum Ausdrücke sind ein prägnanter und deklarativer Weg, um Tensor Kontraktionen wie $A,B \rightarrow C$ auszudrücken.
+Einsum Bäume beschreiben eine Serie solcher Ausdrücke.
+\texttt{einsum\_ir} \cite{einsum_ir} ist eine Bibliothek um Einsum Bäume effizient auf einer einzelnen Recheneinheit auszuwerten.
+Diese Arbeit schlägt die Beschleunigung von \texttt{einsum\_ir} vor mit der Hilfe von drei Algorithmen die verteilte Speicherparallelisierung nutzen.
+In Tests hat nur einer der drei Algorithmen eine signifikante Beschleunigung demonstrieren können, während die anderen beiden bestenfalls genauso schnell wie \texttt{einsum\_ir} waren, trotz doppelt so vielen genutzten Recheneinheiten.
 \end{otherlanguage}

@@ -6,3 +6,6 @@
 thesis_main.pdf
 *.toc
 *.blg
+*.bbl
+*.bcf
+*.out
