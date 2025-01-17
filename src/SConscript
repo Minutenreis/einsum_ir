@@ -101,5 +101,7 @@ if g_env['libxsmm'] != False and g_env['libtorch'] != False:
   g_env.exe['bench_binary_mpi'] = g_env.Object( 'bench_binary_mpi.cpp' )
   g_env.exe['bench_tree']       = g_env.Object( 'bench_tree.cpp' )
   g_env.exe['bench_tree_mpi']   = g_env.Object( 'bench_tree_mpi.cpp' )
+  g_env.exe['bench_tree_mpi_local'] = g_env.Object( 'bench_tree_mpi_local.cpp' )
+  g_env.exe['bench_tree_mpi_dist'] = g_env.Object( 'bench_tree_mpi_dist.cpp' )
 
 Export('g_env')

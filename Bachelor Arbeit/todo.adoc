@@ -5,3 +5,6 @@
 [ ] Anhang schreiben
 [ ] Kurzfassung schreiben
 [ ] Acknowledgement schreiben
+
+Rank 1 5% slower (max 1.9x) -> messen
+beschreiben, dass erste messungen deutlich schlechter waren (hypothese throttling)

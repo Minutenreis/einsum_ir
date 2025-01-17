@@ -215,9 +215,13 @@ g_env.Program( g_env['build_dir']+'/tests',
                source = g_env.tests )
 
 # if "mpi" in g_env["CXX"]:
-g_env["CXX"] = "/home/justus/mpich/bin/mpicxx" # set path to own mpicxx compiler
+g_env["CXX"] = "/usr/bin/mpicxx" # set path to own mpicxx compiler
 g_env.Program( g_env['build_dir']+'/bench_binary_mpi',
                  source = g_env.sources + g_env.exe['bench_binary_mpi'] )
 g_env.Program( g_env['build_dir']+'/bench_tree_mpi',
                   source = g_env.sources + g_env.exe['bench_tree_mpi'] )
-g_env.AppendUnique(CXXFLAGS = [("-mcpu=neoverse-v2")]) # set to target architecture
+g_env.Program( g_env['build_dir']+'/bench_tree_mpi_local',
+                  source = g_env.sources + g_env.exe['bench_tree_mpi_local'] )
+g_env.Program( g_env['build_dir']+'/bench_tree_mpi_dist',
+                  source = g_env.sources + g_env.exe['bench_tree_mpi_dist'] )
+# g_env.AppendUnique(CXXFLAGS = [("-mcpu=neoverse-v2")]) # set sto target architecture
