@@ -20,7 +20,8 @@ for filename in files:
         lines = f.readlines()
         lines = lines[1:]
         lines = [line.strip().split(",") for line in lines]
-        for i in {2,4,8,16,32,64, 72,128, 180, 256, 384}:
+        resultRange = [2,4,8,16,32,64, 72,128, 180, 256, 384]
+        for i in resultRange:
             gflops = 0
             for j in range (10):
                 size = int(lines[j][0])
@@ -42,16 +43,16 @@ gflops_mpi_k = results[5]
 gflops_mpi_m_n = results[6]
 
 plt.figure(figsize=(10, 5))
-plt.plot(size_1_arr, gflops_144_arr, '-+', label="einsum_ir 144 cores")
-plt.plot(size_1_arr, gflops_72_0_arr, '-+', label="einsum_ir 72 cores socket 0")
-plt.plot(size_1_arr, gflops_72_1_arr, '-+', label="einsum_ir 72 cores socket 1")
-plt.plot(size_1_arr, gflops_mpi_c, '-+', label="einsum_ir 144 cores distributed c0")
-plt.plot(size_1_arr, gflops_mpi_m_n, '-+', label="einsum_ir 144 cores distributed m0 and n0")
-plt.plot(size_1_arr, gflops_mpi_k, '-+', label="einsum_ir 144 cores distributed k0")
-
+plt.plot(size_1_arr, gflops_144_arr, '-o', label="einsum_ir 144 cores")
+plt.plot(size_1_arr, gflops_72_0_arr, '-v', label="einsum_ir 72 cores socket 0")
+plt.plot(size_1_arr, gflops_72_1_arr, '-^', label="einsum_ir 72 cores socket 1")
+plt.plot(size_1_arr, gflops_mpi_c, '-s', label="einsum_ir 144 cores distributed c0")
+plt.plot(size_1_arr, gflops_mpi_m_n, '-*', label="einsum_ir 144 cores distributed m0 and n0")
+plt.plot(size_1_arr, gflops_mpi_k, '-P', label="einsum_ir 144 cores distributed k0")
+plt.grid(axis="both")
 
 plt.xlabel("m0 = n0 = k0")
 plt.ylabel("GFLOPS")
 plt.legend()
-plt.title("Average Performance on grace")
+plt.title("Average Performance on NVIDIA grace CPU Superchip")
 plt.savefig("gflops_grace.png")
