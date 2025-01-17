@@ -6,10 +6,8 @@
 #include "backend/BinaryContractionTpp.h"
 #include "backend/EinsumNode.h"
 #include <ATen/ATen.h>
-#include <mpi.h>
 
 const auto datatypeEinsum = einsum_ir::FP32;
-const auto datatypeMPI = MPI_FLOAT;
 using datatype = float;
 
 // expect rank0 to always have the "lower" half and rank1 to have the "upper" half
@@ -21,7 +19,7 @@ struct Tensor {
 
 void benchmark(int64_t size_1, int64_t size_2) {
   std::chrono::steady_clock::time_point tp0, tp1;
-  std::chrono::duration<double> dur, dur_mpi;
+  std::chrono::duration<double> dur;
 
   const int64_t l_size_c0 = 2;
 
@@ -147,11 +145,6 @@ void benchmark(int64_t size_1, int64_t size_2) {
 
 int main(int argc, char const *argv[]) {
 
-  int provided;
-  MPI_Init_thread(NULL, NULL, MPI_THREAD_SERIALIZED, &provided);
-
-  omp_set_nested(true); // allow multiple nested parallel regions
-
   at::set_default_dtype(caffe2::TypeMeta::Make<datatype>()); // set default datatype
 
   if (argc != 2 && argc != 3) {
@@ -164,8 +157,6 @@ int main(int argc, char const *argv[]) {
     int size_2 = atoi(argv[2]);
     benchmark(size_1, size_2);
   }
-
-  MPI_Finalize();
 
   return EXIT_SUCCESS;
 }
