@@ -13,7 +13,7 @@ echo "size_1, gflops" > grace_local_144.csv
 echo "size_1, gflops" > grace_local_72_0.csv
 echo "size_1, gflops" > grace_local_72_1.csv
 
-for i in 2 4 8 16 32 64 72 128 180 256
+for i in 2 4 8 16 32 64 72 128 180 256 384
 do
 	for j in {1..10}
 	do
