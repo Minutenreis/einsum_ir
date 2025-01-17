@@ -57,25 +57,27 @@ echo "****************************"
 
 # install mpich
 wget https://www.mpich.org/static/downloads/4.2.3/mpich-4.2.3.tar.gz
+tar xfz mpich-4.2.3.tar.gz 
+mkdir mpich
+mkdir tmp_mpich
+cd tmp_mpich
+../mpich-4.2.3/configure -prefix=/home/fedora/mpich |& tee c.txt
+make -j 16
+make install
 
+cd ..
 
 git clone https://github.com/Minutenreis/einsum_ir.git
 cd einsum_ir
 git log | head -n 25
 
 wget https://github.com/catchorg/Catch2/releases/download/v2.13.10/catch.hpp
-tar xfz mpich-4.2.3.tar.gz 
-mkdir mpich
-mkdir tmp_mpich
-cd tmp_mpich
-../mpich-4.2.3/configure -prefix=/home/fedora/mpich |& tee c.txt
-make 2>&1 | tee m.txt
 
 
 
-# CXX=g++-13 CC=g++-13 scons libtorch=../venv_pytorch/lib/python3.10/site-packages/torch blas=$(pwd)/../openblas tblis=$(pwd)/../tblis libxsmm=$(pwd)/../libxsmm -j8
-# mv build build_gcc
+CXX=g++-13 CC=g++-13 scons libtorch=../venv_pytorch/lib/python3.10/site-packages/torch blas=$(pwd)/../openblas tblis=$(pwd)/../tblis libxsmm=$(pwd)/../libxsmm -j8 --sconstruct=SConstruct_g8c
+mv build build_gcc
 
-# CXX=clang++ CC=clang scons libtorch=../venv_pytorch/lib/python3.10/site-packages/torch blas=$(pwd)/../openblas tblis=$(pwd)/../tblis libxsmm=$(pwd)/../libxsmm -j8
-# mv build build_llvm
-# cd ..
+CXX=clang++ CC=clang scons libtorch=../venv_pytorch/lib/python3.10/site-packages/torch blas=$(pwd)/../openblas tblis=$(pwd)/../tblis libxsmm=$(pwd)/../libxsmm -j8 --sconstruct=SConstruct_g8c
+mv build build_llvm
+cd ..

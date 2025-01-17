@@ -215,7 +215,7 @@ g_env.Program( g_env['build_dir']+'/tests',
                source = g_env.tests )
 
 # if "mpi" in g_env["CXX"]:
-g_env["CXX"] = "/usr/bin/mpicxx" # set path to own mpicxx compiler
+g_env["CXX"] = "/home/justus/mpich/bin/mpicxx" # set path to own mpicxx compiler
 g_env.Program( g_env['build_dir']+'/bench_binary_mpi',
                  source = g_env.sources + g_env.exe['bench_binary_mpi'] )
 g_env.Program( g_env['build_dir']+'/bench_tree_mpi',
