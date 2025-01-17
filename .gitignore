@@ -1,5 +1,7 @@
 /OpenBLAS-0.3.26
 /build/**
+/build_gcc/**
+/build_llvm/**
 .sconsign.dblite
 openblas
 catch.hpp
