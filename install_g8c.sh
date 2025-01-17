@@ -80,4 +80,3 @@ mv build build_gcc
 
 CXX=clang++ CC=clang scons libtorch=../venv_pytorch/lib/python3.10/site-packages/torch blas=$(pwd)/../openblas tblis=$(pwd)/../tblis libxsmm=$(pwd)/../libxsmm -j8 --sconstruct=SConstruct_g8c
 mv build build_llvm
-cd ..
