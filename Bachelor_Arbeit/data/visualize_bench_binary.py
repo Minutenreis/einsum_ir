@@ -29,11 +29,9 @@ with open(filename, "r") as f:
         sortedArrayByGflops = sorted(intermediateArray, key=lambda x: x[1])
         
         threads = sortedArrayByGflops[0][0]
-        # gflops = sum([x[1] for x in sortedArrayByGflops]) / 100
         gflops = sortedArrayByGflops[25][1]
         gflops_10 = sortedArrayByGflops[5][1]
         gflops_90 = sortedArrayByGflops[45][1]
-        # gflops_mpi = sum([x[2] for x in sortedArrayByGflopsMPI]) / 100
         threads_arr.append(threads)
         gflops_arr.append(gflops)
         gflops_10_arr.append(gflops_10)
