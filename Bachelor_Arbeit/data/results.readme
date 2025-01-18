@@ -74,3 +74,7 @@ bash grace_bench_binary_50.sh
 just tests for scalability across more threads of m0 = k0 = k1 = 96 and m1 = n0 = n1 = 84, c0 = 1
 
 grace_ and g8c_ results are made with their respective g8c_bench_tree.sh / grace_bench_tree.sh scripts
+
+[c0,m0,k0,k1,m1],[c0,n0,k0,n1,k1]->[c0,m0,n0,n1,m1]
+grace_master_worker.csv was made with grace_bench_master_worker.sh
+grace_mw_comp_c0.csv was made with grace_bench_mw_comp.sh and remade the contraction to [c0,m0,k0,k1,m1],[c0,n0,k0,n1,k1]->[c0,m0,n0,n1,m1]
