@@ -1,26 +1,39 @@
 \section{Background}
 
 \subsection{Tensor Contractions}
-\label{Tensorcontractions}
+\label{sec:tensorContractions}
 
 %TODO: HOW THE HELL DO I INTRODUCE MATH?!
 Tensor contractions are a generalization of batched matrix multiplications on n-dimensional arrays called order-n tensors.
-Imagine contraction of an order-$n$ tensor $A \in \mathbb{R}^{I_1\times\dots\times I_n}$ and an order-$m$ tensor $B \in \mathbb{R}^{J_1\times\dots\times J_m}$ with k shared dimensions to multiply to a new order-$(n+m-k)$ tensor $C \in \mathbb{R}^{K^1\times\dots\times K^{(n+m-k)}}$.
-As an example from "Einsum is all you need" \cite{einsum_is_all_you_need} imagine $n=4, m=5$, $I_2 = J_3$ and $I_3 = J_5$.
-The resulting Tensor $C$ would be computed as $C_{pstuv}=\sum_{q}\sum_{r}A_{pqrs}B_{tuqvr}$.
+In a binary contraction of two tensors $A$ and $B$ to a third tensor $C$ we will refer to the first input tensor $A$ as left tensor and the second input tensor $B$ as the right one. %todo: will hier in Ordnung?
+We use the following classification for the dimensions in the tensors $A$,$B$ and $C$:
+
+\begin{tabular}{ |c|c|c|c| } 
+  \hline
+  $dimension type$ & present in A & present in B & present in C\\
+  \hline
+  $c$ & $\checkmark$& $\checkmark$& $\checkmark$\\
+  $m$ & $\checkmark$& $\crossmark$& $\checkmark$\\
+  $n$ & $\crossmark$& $\checkmark$& $\checkmark$\\
+  $k$ & $\checkmark$& $\checkmark$& $\crossmark$\\
+  \hline
+ \end{tabular}
+
+
 
 \subsection{Einsum expressions}
 
-Einsum expressions allow for a more succinct expression than the typical Tensor notation as used in \ref{Tensorcontractions}.
+Einsum expressions allow for a more succinct expression than the typical Tensor notation as used in \ref{sec:tensorContractions}.
 Instead of writing $C_{pstuv}=\sum_{q}\sum_{r}A_{pqrs}B_{tuqvr}$ the same contraction is expressed as $A_{pqrs}B_{tuqvr} \rightarrow C_{pstuv}$.
 The summation signs are now implicit.
-Einsum expressions can also describe the contractions from more than 2 tensors\cite{einsum_is_all_you_need}.
+Einsum expressions can also describe the contractions of more than 2 tensors\cite{einsum_is_all_you_need}.
+%todo: can I just recommend people to look at resources such as "Einsum is all you need" for an advanced introduction?
 Instead of writing $D_{ij} = \sum_{k}\sum_{l}A_{ik}B_{jkl}C_{il}$ it is expressed as $A_{ik}B_{jkl}C_{il} \rightarrow D_{ij}$.
-All expression in the rest of the paper are expressed as simplified einsum expression.
-Either written as $A,B\rightarrow C$, leaving out the indices, or as $pqrs,tuqvr \rightarrow pstuv$, leaving out the tensor variables.
+All expression in the rest of this thesis are written as simplified einsum expression, either written as $A,B\rightarrow C$, leaving out the indices, or as $pqrs,tuqvr \rightarrow pstuv$, leaving out the tensor variables.
 The evaluation of einsum expression is supported in the popular frameworks Torch\cite{torch}, PyTorch\cite{pytorch} and Tensorflow\cite{tensorflow}.
 
 \subsection{einsum\_ir}
+\label{sec:einsum_ir}
 
 \begin{figure}[ht]
   \centering{\includegraphics[width=0.95\textwidth]{gflops_threads.png}}

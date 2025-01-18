@@ -1,22 +1,22 @@
-\section{Scaling up the number of nodes}
+\section{Scaling up the Number of Processes}
 
-The previously discussed master-worker algorithm expects all input tensors before and the output tensor after a contraction to reside within a single master node.
-Imagine we now have $p$ nodes (this notation for the number of nodes will hold true throughout this chapter).
-The master node is now involved in sending and receiving $\frac{p-1}{p}$ parts of the tensors in the contraction.
-Meanwhile, the worker nodes each only communicate $\frac{1}{p}$ part of the tensors with the master.
+The previously discussed master-worker algorithm expects all input tensors before and the output tensor after a contraction to reside within a single master process.
+Imagine we now have $p$ processes.
+The master process is now involved in sending and receiving $\frac{p-1}{p}$ parts of the tensors in the contraction.
+Meanwhile, the worker processes each only communicate $\frac{1}{p}$ parts of the tensors with the master.
 The larger $p$ gets the more unbalanced communication in the master-worker algorithm gets.
-It also might run into memory issues should the total size of all tensors exceed the master nodes' memory size.
+It also might run into memory issues should the total size of all tensors exceed the master process' memory size.
 
 Instead, let us consider algorithms that work on distributed tensors as input and output.
-Such algorithms allow the communication load to be balanced across all nodes.
+Such algorithms allow the communication load to be balanced across all processes.
 
 As basis for such an algorithm, we make the following assumptions:
 \begin{enumerate}
-    \item input tensors are predistributed across all nodes
+    \item input tensors are predistributed across all processes
     \item output tensors may stay distributed
     \item tensors are sufficiently compute intensive that communication is not a bottleneck
-    \item the distributed dimension is a multiple of the total number of nodes
-    \item each node has multiple threads.
+    \item the distributed dimension is a multiple of the total number of processes $p$
+    \item each process has multiple threads.
 \end{enumerate}
 
 % todo: justify assumptions after talking about algorithms
@@ -25,22 +25,21 @@ With those assumptions we will conceive three algorithms:
 
 \subsection{Distributed c Dimension}
 
-\begin{algorithm}[h]
+\begin{algorithm}[ht]
     \begin{algorithmic}
     \Require $i = \texttt{mpi\_rank}, A_i, B_i$
     \Ensure $C_i$
     \State $A_i, B_i \rightarrow C_i$
 \end{algorithmic}
 \caption{Distributed c contraction}
-\label{c_pseudocode}
+\label{alg:c_pseudocode}
 \end{algorithm}
 
-If a tensor contraction $A,B \rightarrow C$ shares a dimension between all three tensors, we will call it a c dimension.
-Imagine $A$,$B$ and $C$ share such a c dimension $c_0$
-Contracting such an expression is the same as splitting $A$ and $B$ alongside $c_0$ into $p$ equal chunks $A_0\dots A_{p-1}, B_0\dots B_{p-1}$, contracting the chunks $A_i, B_i \rightarrow C_i$ and then concatenating the $p$ chunks of $C_i$ at $c_0$ dimension to $C$.
-Since the contractions $\forall i \in p: A_i, B_i \rightarrow C_i$ are independent of each other, we can work on them in parallel.
+Imagine $A$,$B$ and $C$ share a c dimension $c_0$
+Contracting such an expression is the same as splitting $A$ and $B$ alongside $c_0$ into $p$ equal chunks $A_1\dots A_{p}, B_1\dots B_{p}$, contracting the chunks $A_i, B_i \rightarrow C_i$ and then concatenating the $p$ chunks of $C_i$ at $c_0$ dimension to $C$.
+Since the contractions $A_i, B_i \rightarrow C_i$ are independent of each other, the processes can work on them in parallel.
 
-\subsection{Distributed m/n Dimensions}
+\subsection{Distributed m and n Dimensions}
 
 \begin{algorithm}[h]
         \begin{algorithmic}
@@ -59,32 +58,33 @@ Since the contractions $\forall i \in p: A_i, B_i \rightarrow C_i$ are independe
         \State $C_i \gets \texttt{concat}(C_{i,0}\dots C_{i,p})$
     \end{algorithmic}
     \caption{Distributed m/n contraction}
-    \label{m_n_pseudocode}
+    \label{alg:m_n_pseudocode}
 \end{algorithm}
 
-If a tensor contraction $A,B \rightarrow C$ shares a dimension between one input tensor and the output tensor, but not the second input tensor, we will call it an m dimension if it is included in $A$ and an n dimension if it is included in $B$.
+%todo: reword algorithm (?) and double check which variant I am describing in text (m_n_out_n or m_n_out_m)
+
 Imagine $A$ and $C$ share an m dimension $m_0$ and $B$ and $C$ share an n dimension $n_0$.
 Contracting an expression $A,B \rightarrow C$ is then the same as splitting $A$ along $m_0$ into $p$ chunks $A_0\dots A_{p-1}$ and $B$ along $n_0$ into $p$ chunks $B_0\dots B_{p-1}$.
 We can imagine $C$ then as the concatenation of $C_0\dots C_p$ chunks split along the $m_0$ dimension and $C_i$ for $0 \leq i \leq p$ as the concatenation of $C_{i,0} \dots C_{i,p}$ along $n_0$.
 We can compute each $C_{i,j}$ as $A_i,B_j \rightarrow C_{i,j}$.
 To calculate a chunk $C_i$ a process needs all of $A$.
 Instead of executing an \texttt{allgather} on $A$ we will calculate $C_i$ stepwise.
-In each step each node will contract one part $C_{i,j}$ of $C_i$ as $A_i,B_j \rightarrow C_{i,j}$.
-Simultaneously each node will get a new chunk $B_{j+1}$ from their neighbour with a higher rank in a ring, so the node with the highest rank gets its chunk from the node with rank 0.
-To enable both the contraction and the communication of the new chunk to occur simultaneously each node needs extra memory with the size of one chunk of $B$.
-Since we assume all tensors to be predistributed, each node will begin with its diagonal part $C_{i,i}$ where i equals the rank of the node.
-Following the above algorithm each node will compute $C_{i,i}, \dots C_{i,p-1},C_{i,0},\dots,C_{i,i-1}$.
-After we concatenate those chunks $C_{0,i}\dots C_{p-1,i}$ to $C_i$ our algorithm is done.
+In each step each process will contract one part $C_{i,j}$ of $C_i$ as $A_i,B_j \rightarrow C_{i,j}$.
+Simultaneously each process will get a new chunk $B_{j+1}$ from their neighbour with a higher rank in a ring, so the process with the highest rank gets its chunk from the process with rank 0.
+To enable both the contraction and the communication of the new chunk to occur simultaneously each process needs extra memory with the size of one chunk of $B$ and employ an extra communication thread to fulfill the communication on that extra chunk.
+Since we assume all tensors to be predistributed, each process will begin with its diagonal part $C_{i,i}$ where i equals the rank of the process.
+Following the above algorithm each process will compute $C_{i,i}, \dots C_{i,p-1},C_{i,0},\dots,C_{i,i-1}$.
+After we concatenate those chunks $C_{0,i}\dots C_{p-1,i}$ to $C_i$ our algorithm is done and $C$ is distributed along $n_0$.
 
-In the implementation we can make the last concatenation implicit as long as we already calculate each chunk $C_{i,j}$ already with the correct strides in the results tensor $C_i$.
-Due to limitations in the binary contraction interface of \texttt{einsum\_ir} however this is only possibly should each chunk $C_{i,j}$ be continuous in $C_i$.
-So for the implementations we have to assume that $n_0$ is the outermost dimension of $C_i$.
+In the implementation we can make the final concatenation implicit as long as we contract each chunk $C_{i,j}$ already with the correct strides into the output tensor $C_i$.
+Due to limitations in the binary contraction described in Section \ref{sec:einsum_ir} this is only possibly should each chunk $C_{i,j}$ be contiguous in $C_i$.
+To fulfill that the implementation has to restrict the $m_0$ dimension to be the outermost dimension of $C$.
 
-We could also consider another very similar algorithm where each node gets a chunk $A_i$ in each iteration instead of $B_j$.
+We could also consider another very similar algorithm where each process gets a chunk $A_i$ in each step instead of $B_j$.
 Such an algorithm is omitted here, since the same effect can be achieved by swapping the input tensors as $A' \coloneqq B$ and $B' \coloneqq A$, which results in $A',B' \rightarrow C$.
 
 The algorithm employs a ring-like communication pattern to reduce memory usage.
-Instead of moving all the tensors in each time step, one could imagine an algorithm where each node keeps its input tensor chunks $B_i$ and sends them directly to whichever node needs them.
+Instead of moving all the tensors in each time step, one could imagine an algorithm where each process keeps its chunk $B_i$ and sends them directly to whichever process that needs it.
 That comes with the problem of still needing one tensor to contract on and another to handle the communication at the same time.
 Since the initial tensor $B_i$ may no longer be moved now, this takes an additional buffer of size $|B_i|$.
 
@@ -129,7 +129,7 @@ Since the initial tensor $B_i$ may no longer be moved now, this takes an additio
 
 \end{algorithmic}
 \caption{Distributed k contraction}
-\label{k_pseudocode}
+\label{alg:k_pseudocode}
 \end{algorithm}
 
 If a tensor contraction $A,B \rightarrow C$ shares a dimension between both input tensor, but not in the output tensor, we will call it a k dimension.
@@ -137,14 +137,14 @@ Imagine $A$ and $B$ share a k dimension $k_0$.
 Contracting an expression $A,B \rightarrow C$ is the same as splitting $A$ and $B$ along $k_0$ into p chunks $A_0\dots A_{p-1}$ and $B_0\dots B_{p-1}$.
 If we define $C_i$ as the result from $A_i,B_i \rightarrow C_i$, $C=\sum{C_i}$.
 To receive a distributed output tensor we would have to split $C$ into $p$ chunks $C_0\dots C_{p-1}$ again.
-Instead of first computing the whole of C on each node, we can compute partial sums of the output tensors $C_j$, where 
+Instead of first computing the whole of C on each process, we can compute partial sums of the output tensors $C_j$, where 
 $C_j = \sum_{i=0}^{p-1} C_{i,j}$.
-Each node $j$ can compute all updates $C_{0,j}\dots C_{p-1,j}$.
-To end each node on its chunk $C_j$ we imagine each node adding its partial sum $C_{i,j}$ to an existing partial sum of $C_i$ and then communicating this partial sum to its previous neighbour $j+p-1 \mod p$.
-If each node starts adding upon $C_{j+1}$, it will end up with $C_j$ after all nodes have added all partial sums to $C_j$.
+Each process $j$ can compute all updates $C_{0,j}\dots C_{p-1,j}$.
+To end each process on its chunk $C_j$ we imagine each process adding its partial sum $C_{i,j}$ to an existing partial sum of $C_i$ and then communicating this partial sum to its previous neighbour $j+p-1 \mod p$.
+If each process starts adding upon $C_{j+1}$, it will end up with $C_j$ after all processes have added all partial sums to $C_j$.
 This $C_j$ may be split across any arbitrary dimension.
 
 If we want to overlap communication and computation in an implementation we have to slightly adjust the algorithm.
-If we compute partial updates on all of $C_j$ each node has to wait communicating the partial updates until the computation is done.
-Instead, each node should compute half of $C_j$ and already communicate that part while it computes the second half of the partial updates upon it.
-Doing this we can continuously contract on each node.
+If we compute partial updates on all of $C_j$ each process has to wait communicating the partial updates until the computation is done.
+Instead, each process should compute half of $C_j$ and already communicate that part while it computes the second half of the partial updates upon it.
+Doing this we can continuously contract on each process.
