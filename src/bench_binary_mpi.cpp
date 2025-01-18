@@ -23,12 +23,6 @@ void blocked_binary_contraction(int64_t size_1, int64_t size_2) {
   int rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-  if (rank == 0) {
-    std::cout << "*******************************" << std::endl;
-    std::cout << "*** blocked matmul testcase ***" << std::endl;
-    std::cout << "*******************************" << std::endl;
-  }
-
   std::chrono::steady_clock::time_point l_tp0, l_tp1;
   std::chrono::duration<double> l_dur;
   double l_time_compile = 0;
@@ -132,13 +126,6 @@ void blocked_binary_contraction(int64_t size_1, int64_t size_2) {
                     //        m0 n0 c0 n1 m1
                     .permute({0, 3, 1, 4, 2})
                     .contiguous();
-  }
-
-  /*
-   * einsum_ir mpi c0 split
-   */
-  if (rank == 0) {
-    std::cout << "einsum_ir_mpi split:" << std::endl;
   }
 
   // has to be a factor of l_size_c0
