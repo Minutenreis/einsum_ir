@@ -2,9 +2,10 @@
 
 [ ] Begründung für Tensorparallelismus
 [ ] Einführung schreiben
-[ ] Anhang schreiben
 [ ] Kurzfassung schreiben
-[ ] Acknowledgement schreiben
+[ ] Acknowledgement schreiben (optional)
+[ ] Master Worker Algorithmus beschreiben
+[ ] Discussion ordentlich diskutieren
 
 Rank 1 5% slower (max 1.9x) -> messen
 beschreiben, dass erste messungen deutlich schlechter waren (hypothese throttling)

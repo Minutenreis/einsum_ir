@@ -1,11 +1,11 @@
 \section{Discussion}
 
-\begin{figure}
+\begin{figure}[ht]
   \centering{\includegraphics[width=0.95\textwidth]{gflops_grace.png}
   \includegraphics[width=0.95\textwidth]{gflops_g8c.png}
   }
   \caption{
-    Performance of \texttt{einsum\_ir} on a dual socket NVIDIA Grace CPU Superchip and dual socket g8c.metal-48xl Graviton AWS instance.
+    Performance of \texttt{einsum\_ir} on a dual socket NVIDIA Grace CPU Superchip and on a dual socket g8c.metal-48xl Graviton AWS instance.
     The contraction is $m_0c_0k_0k_1m_1, n_0c_0k_0n_0n_1 \rightarrow m_0n_0c_0n_1m_1$ with $|c_0|=2$, $|m_0|=|n_0|=|k_0|$ and $|m_1|=|n_1|=|k_1|=70\text{ on Grace and } 94\text{ on Graviton}$.
     Grace has 72 cores per NUMA domain, Graviton has 96.
     }

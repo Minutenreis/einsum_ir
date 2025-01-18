@@ -21,6 +21,20 @@ As basis for such an algorithm, we make the following assumptions:
 
 % todo: justify assumptions after talking about algorithms
 
+Given sufficiently large einsum trees with sufficiently large tensors the initial predistribution of the input tensors and the final gather of the output tensor will consume a negligible amount of time compared to the evaluation of the tree.
+They will also generally have a higher compute intensity enabling a high throughput despite the lower network speed compared to local memory speeds.
+These assumptions indicate that the proposed algorithms need a minimum tensor size to show improvements over the base \texttt{einsum\_ir} implementation.
+
+Assumption 4 is merely necessary to simplify the algorithms worked on for this paper.
+Should assumption 4 not hold true, for example if a dimension $o$ with $|o|=14$ gets split across $T=4$ processes, the data could be distributed as $4 4 3 3$ or $4 4 4 2$.
+In either case each communication and contraction would merely need at most four variants depending on both input tensor states, either having a "full" chunk with $|o'|=4$ or a "partial" chunk with either $|o''|=3$ or $|o''|=2$.
+A chunk in this case refers to a distributed part of the original tensor that is held in contiguous memory in each process.
+"Split" shall refer to the operation of dividing a tensor into chunks and "gather" as the inverse operation.
+Generalized the chunk sizes would either be $|o'| = \frac{|o|}{|T|}, |o'' = \frac{|o|}{|T|} - 1$, with $o'$ being the dimension of the first $|o'| \mod T$ processes and $o''$ being the dimension size on the last $T - (|o'| \mod T)$ processes, or $|o'| = \frac{|o|}{|T|}, |o''| = |o'| - (|o'| \mod T)$, with $o'$ being the dimension of the first $T-1$ processes and $o''$ only being the dimension of the last one.
+The last assumption is needed as some of the following algorithms use an extra communication thread.
+This thread is solely responsible for pushing all communication and feeding the computation threads continuously with data to process.
+This design was chosen as to overlap communication with computation to minimize waiting times due to network speeds.
+
 With those assumptions we will conceive three algorithms:
 
 \subsection{Distributed c Dimension}
@@ -41,7 +55,7 @@ Since the contractions $A_i, B_i \rightarrow C_i$ are independent of each other,
 
 \subsection{Distributed m and n Dimensions}
 
-\begin{algorithm}[h]
+\begin{algorithm}[ht]
         \begin{algorithmic}
         \Require $i = \texttt{mpi\_rank}, A_i, B_i$
         \Ensure $C_i$
@@ -91,7 +105,7 @@ Since the initial tensor $B_i$ may no longer be moved now, this takes an additio
 \subsection{Distributed k Dimension}
 
 
-\begin{algorithm}
+\begin{algorithm}[ht]
     \begin{algorithmic}
         \Require $\texttt{send\_buffer},\texttt{comp\_buffer},\texttt{recv\_buffer}$
         \Ensure $\texttt{send\_buffer},\texttt{comp\_buffer},\texttt{recv\_buffer}$
@@ -104,7 +118,7 @@ Since the initial tensor $B_i$ may no longer be moved now, this takes an additio
     \label{rotate_pseudocode}
 \end{algorithm}
 
-\begin{algorithm}[h]
+\begin{algorithm}[ht]
 
     \begin{algorithmic}
     \Require $i = \texttt{mpi\_rank}, A_i, B_i, j$
