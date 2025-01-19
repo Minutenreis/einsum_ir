@@ -129,6 +129,28 @@ Since the initial tensor $B_i$ may no longer be moved now, this takes an additio
 
 \subsection{Distributed k Dimension}
 
+\begin{figure}[ht]
+    \centering
+    \begin{subfigure}[t]{0.6\textwidth}
+        \centering
+        \includegraphics[width=1\textwidth]{dist_k.pdf}
+        \subcaption{distributed k algorithm}
+        \label{fig:k_algo_a}
+    \end{subfigure}
+    ~
+    \begin{subfigure}[t]{0.35\textwidth}
+        \centering\includegraphics[width=1\textwidth]{dist_k_memory.png}
+        \subcaption{rotation of buffer roles}
+        \label{fig:k_algo_b}
+    \end{subfigure}
+    \caption{Visualization of Algorithm \ref{alg:k_pseudocode} for the contraction $mk,kn \rightarrow mn$;\\
+    \ref{fig:k_algo_a} shows the order that process 0 (blue) adds its partial updates on the output chunks and which are sent to process 3 (purple) and received from process 1 (orange).\\
+    \ref{fig:k_algo_b} show the output buffer as two connected buffers and the additional memory and how after each step their roles change.
+    After three steps each buffer has the same role again.
+    }
+    \label{fig:k_algo}
+\end{figure}
+
 
 \begin{algorithm}[ht]
     \begin{algorithmic}
@@ -169,6 +191,9 @@ Since the initial tensor $B_i$ may no longer be moved now, this takes an additio
 \caption{Distributed k contraction}
 \label{alg:k_pseudocode}
 \end{algorithm}
+
+
+%todo: check writing
 
 If a tensor contraction $A,B \rightarrow C$ shares a dimension between both input tensor, but not in the output tensor, we will call it a k dimension.
 Imagine $A$ and $B$ share a k dimension $k_0$.
