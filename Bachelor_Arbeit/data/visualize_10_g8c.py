@@ -50,8 +50,8 @@ plt.plot(size_1_arr, gflops_mpi_m_n, '-*', label="einsum_ir 192 cores distribute
 plt.plot(size_1_arr, gflops_mpi_k, '-P', label="einsum_ir 192 cores distributed k0")
 plt.grid(axis="both")
 
-plt.xlabel("m0 = n0 = k0")
+plt.xlabel("$m_0 = n_0 = k_0$")
 plt.ylabel("GFLOPS")
 plt.legend()
 plt.title("Average Performance on AWS c8g.metal-48xl")
-plt.savefig("gflops_g8c.png")
+plt.savefig("gflops_g8c.png", pad_inches=0.1, bbox_inches='tight')

@@ -51,8 +51,8 @@ plt.plot(size_1_arr, gflops_mpi_m_n, '-*', label="einsum_ir 144 cores distribute
 plt.plot(size_1_arr, gflops_mpi_k, '-P', label="einsum_ir 144 cores distributed k0")
 plt.grid(axis="both")
 
-plt.xlabel("m0 = n0 = k0")
+plt.xlabel("$m_0 = n_0 = k_0$")
 plt.ylabel("GFLOPS")
 plt.legend()
 plt.title("Average Performance on NVIDIA Grace CPU Superchip")
-plt.savefig("gflops_grace.png")
+plt.savefig("gflops_grace.png", pad_inches=0.1, bbox_inches='tight')

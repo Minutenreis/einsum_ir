@@ -45,4 +45,4 @@ plt.grid(axis="both")
 
 plt.legend()
 plt.title(titleGflops)
-plt.savefig("gflops.png")
+plt.savefig("gflops_threads.png", pad_inches=0.1, bbox_inches='tight')

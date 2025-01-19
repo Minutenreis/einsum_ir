@@ -39,12 +39,12 @@ with open(dist_mw_comp_arr, "r") as f:
 
 
 plt.figure(figsize=(10, 5))
-plt.plot(size_1_arr, master_worker_arr, '-o', label="einsum_ir master worker")
+plt.plot(size_1_arr, master_worker_arr, '-o', label="einsum_ir master-worker")
 plt.plot(size_1_arr, mw_comp_arr, '-v', label="einsum_ir distributed c")
 plt.grid(axis="both")
 
-plt.xlabel("m0 = n0 = k0")
+plt.xlabel("$m_0 = n_0 = k_0$")
 plt.ylabel("GFLOPS")
 plt.legend()
 plt.title("Average Performance on NVIDIA Grace CPU Superchip")
-plt.savefig("gflops_grace_master_worker.png")
+plt.savefig("gflops_grace_master_worker.png", pad_inches=0.1, bbox_inches='tight')
