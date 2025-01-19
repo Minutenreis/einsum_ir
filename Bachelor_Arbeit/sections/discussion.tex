@@ -19,7 +19,7 @@ I used Python Matplotlib\cite{matplotlib} to visualize the results.
 \subsection{Distributed einsum\_ir Performance}
 
 \begin{figure}[ht]
-  \centering{\includegraphics[width=1\textwidth]{gflops_grace_master_worker.png}
+  \centering{\includegraphics[width=0.5\textwidth]{gflops_grace_master_worker.png}
   }
   \caption{
     Performance of \texttt{einsum\_ir} distributed c algorithm and the master worker algorithm on a dual socket NVIDIA Grace CPU Superchip.
@@ -39,10 +39,9 @@ I could not test larger sizes as the messages got to big for MPI, which uses a 3
 The overall result still shows the greater potential in a distributed algorithm, as it can scale easier to more nodes and performs better on most sizes, at least those I could test.
 It also places fewer restrictions on the contraction itself as the c dimensions do not have to be the outermost dimension of all tensors.
 
-
 \begin{figure}[ht]
-  \centering{\includegraphics[width=1\textwidth]{gflops_grace.png}
-  \includegraphics[width=1\textwidth]{gflops_g8c.png}
+  \centering{\includegraphics[width=0.49\textwidth]{gflops_grace.png}
+  \includegraphics[width=0.49\textwidth]{gflops_g8c.png}
   }
   \caption{
     Performance of \texttt{einsum\_ir} on a dual socket NVIDIA Grace CPU Superchip and on a dual socket g8c.metal-48xl Graviton AWS instance.
