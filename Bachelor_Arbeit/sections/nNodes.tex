@@ -1,4 +1,5 @@
 \section{Scaling up the Number of Processes}
+\label{sec:n_nodes}
 
 The previously discussed master-worker algorithm expects all input tensors before and the output tensor after a contraction to reside within a single master process.
 Imagine we now have $p$ processes.
@@ -26,11 +27,8 @@ They will also generally have a higher compute intensity enabling a high through
 These assumptions indicate that the proposed algorithms need a minimum tensor size to show improvements over the base \texttt{einsum\_ir} implementation.
 
 Assumption 4 is merely necessary to simplify the algorithms worked on for this paper.
-Should assumption 4 not hold true, for example if a dimension $o$ with $|o|=14$ gets split across $T=4$ processes, the data could be distributed as $4 4 3 3$ or $4 4 4 2$.
+Should assumption 4 not hold true, for example if a dimension $o$ with $|o|=14$ gets split across $p=4$ processes, the data could be distributed as $4 4 3 3$ or $4 4 4 2$.
 In either case each communication and contraction would merely need at most four variants depending on both input tensor states, either having a "full" chunk with $|o'|=4$ or a "partial" chunk with either $|o''|=3$ or $|o''|=2$.
-A chunk in this case refers to a distributed part of the original tensor that is held in contiguous memory in each process.
-"Split" shall refer to the operation of dividing a tensor into chunks and "gather" as the inverse operation.
-Generalized the chunk sizes would either be $|o'| = \frac{|o|}{|T|}, |o'' = \frac{|o|}{|T|} - 1$, with $o'$ being the dimension of the first $|o'| \mod T$ processes and $o''$ being the dimension size on the last $T - (|o'| \mod T)$ processes, or $|o'| = \frac{|o|}{|T|}, |o''| = |o'| - (|o'| \mod T)$, with $o'$ being the dimension of the first $T-1$ processes and $o''$ only being the dimension of the last one.
 The last assumption is needed as some of the following algorithms use an extra communication thread.
 This thread is solely responsible for pushing all communication and feeding the computation threads continuously with data to process.
 This design was chosen as to overlap communication with computation to minimize waiting times due to network speeds.
@@ -38,6 +36,14 @@ This design was chosen as to overlap communication with computation to minimize 
 With those assumptions we will conceive three algorithms:
 
 \subsection{Distributed c Dimension}
+
+\begin{figure}[ht]
+    \centering\includegraphics[width=0.3\textwidth]{dist_c.png} 
+    \caption{Visualization of the distributed c algorithm for the contraction $cmk,ckn \rightarrow cmn$; 
+    each color represents a process and the data they hold; 
+    since the tensors are distributed along the same c dimension, each node can locally contract its chunks to generate its chunk of the output tensor.}
+    \label{fig:c_algo}
+    \end{figure}
 
 \begin{algorithm}[ht]
     \begin{algorithmic}
@@ -49,9 +55,9 @@ With those assumptions we will conceive three algorithms:
 \label{alg:c_pseudocode}
 \end{algorithm}
 
-Imagine $A$,$B$ and $C$ share a c dimension $c_0$
-Contracting such an expression is the same as splitting $A$ and $B$ alongside $c_0$ into $p$ equal chunks $A_1\dots A_{p}, B_1\dots B_{p}$, contracting the chunks $A_i, B_i \rightarrow C_i$ and then concatenating the $p$ chunks of $C_i$ at $c_0$ dimension to $C$.
-Since the contractions $A_i, B_i \rightarrow C_i$ are independent of each other, the processes can work on them in parallel.
+Imagine $A$,$B$ and $C$ are distributed over a c dimension $c_0$.
+As described in \ref{sec:einsum_expr} in such a case each process has to only contract its local chunks.
+This algorithm is the best case since no communication has to occur and cutting a tensor among its c dimension keeps its compute intensity.
 
 \subsection{Distributed m and n Dimensions}
 
@@ -119,7 +125,6 @@ Since the initial tensor $B_i$ may no longer be moved now, this takes an additio
 \end{algorithm}
 
 \begin{algorithm}[ht]
-
     \begin{algorithmic}
     \Require $i = \texttt{mpi\_rank}, A_i, B_i, j$
     \Ensure $C_i$

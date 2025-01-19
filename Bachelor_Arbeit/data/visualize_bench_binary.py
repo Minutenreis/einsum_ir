@@ -40,6 +40,7 @@ with open(filename, "r") as f:
 
 plt.figure(figsize=(10, 5))
 plt.plot(threads_arr, gflops_arr, 'r-+', label="Median einsum_ir")
+plt.axvline(x=72, color='b', linestyle='--', label="72 threads")
 plt.fill_between(threads_arr, gflops_10_arr, gflops_90_arr, color='r', alpha=0.5, label="einsum_ir 10th and 90th percentile")
 plt.xlabel("number of threads")
 plt.ylabel("GFLOPS")

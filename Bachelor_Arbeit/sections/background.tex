@@ -5,7 +5,7 @@
 
 %TODO: HOW THE HELL DO I INTRODUCE MATH?!
 Tensor contractions are a generalization of batched matrix multiplications on n-dimensional arrays called order-n tensors.
-In a binary contraction of two tensors $A$ and $B$ to a third tensor $C$ we will refer to the first input tensor $A$ as left tensor and the second input tensor $B$ as the right one. %todo: will hier in Ordnung?
+In a binary contraction of two tensors $A$ and $B$ to a third tensor $C$ we refer to the first input tensor $A$ as left tensor and the second input tensor $B$ as the right one. %todo: will hier in Ordnung?
 We use the following classification for the dimensions in the tensors $A$,$B$ and $C$:
 
 \begin{tabular}{ |c|c|c|c| } 
@@ -17,11 +17,18 @@ We use the following classification for the dimensions in the tensors $A$,$B$ an
   $n$ & $\crossmark$& $\checkmark$& $\checkmark$\\
   $k$ & $\checkmark$& $\checkmark$& $\crossmark$\\
   \hline
- \end{tabular}
+\end{tabular}
+
+We will further define two operations for our distribution.
+The first operation is \textit{cutting} a tensor along a dimension $o$.
+It shall refer to dividing a tensor into $n \in \mathbb{N}$ chunks.
+The first such chunk composes the all values of the tensor with $o \in [1,\frac{|o|}{T}]$, the second all values with $o \in [\frac{|o|}{T}+1, 2 \cdot \frac{|o|}{T}]$ and so on.
+The last chunk shall consist of all remaining values with $o \in [(n-1) \cdot \frac{|o|}{T}, |o|]$.
+The second operation is \textit{concatenating} a tensor as the inverse operation of \textit{cutting}.
 
 
-
-\subsection{Einsum expressions}
+\subsection{Einsum Expressions}
+\label{sec:einsum_expr}
 
 Einsum expressions allow for a more succinct expression than the typical Tensor notation as used in \ref{sec:tensorContractions}.
 Instead of writing $C_{pstuv}=\sum_{q}\sum_{r}A_{pqrs}B_{tuqvr}$ the same contraction is expressed as $A_{pqrs}B_{tuqvr} \rightarrow C_{pstuv}$.
@@ -30,26 +37,46 @@ Einsum expressions can also describe the contractions of more than 2 tensors\cit
 %todo: can I just recommend people to look at resources such as "Einsum is all you need" for an advanced introduction?
 Instead of writing $D_{ij} = \sum_{k}\sum_{l}A_{ik}B_{jkl}C_{il}$ it is expressed as $A_{ik}B_{jkl}C_{il} \rightarrow D_{ij}$.
 All expression in the rest of this thesis are written as simplified einsum expression, either written as $A,B\rightarrow C$, leaving out the indices, or as $pqrs,tuqvr \rightarrow pstuv$, leaving out the tensor variables.
-The evaluation of einsum expression is supported in the popular frameworks Torch\cite{torch}, PyTorch\cite{pytorch} and Tensorflow\cite{tensorflow}.
+The evaluation of einsum expression is supported in the popular frameworks like Torch\cite{torch}, Numpy\cite{numpy} and Tensorflow\cite{tensorflow}.
+
+We will make a few observations about the different dimension types introduced in \ref{sec:tensorContractions} in the einsum notation for the general expression $A,B \rightarrow C$:
+
+Assuming that $A$,$B$ and $C$ share a c dimension $c_0$ the expression is equivalent to:
+\begin{enumerate}
+  \item cut $A$,$B$ and $C$ along $c_0$ into $T \in \mathbb{N}$ chunks $A_1 \dots A_T$,$B_1 \dots B_T$ and $C_1 \dots C_T$
+  \item $\forall i \in [1,T]: A_i, B_i \rightarrow C_i$
+  \item concatenate all chunks $C_i$ along $c_0$ to $C$
+\end{enumerate}
+
+Assuming that $A$ and $C$ share an m dimension $m_0$ and $B$ and $C$ share an n dimension $n_0$ the expression is equivalent to:
+\begin{enumerate}
+  \item cut $A$ and $C$ along $m_0$ into $T \in \mathbb{N}$ chunks $A_1 \dots A_T$ and $C_1 \dots C_T$
+  \item cut $B$ and all chunks $C_i$ along $n_0$ into $T$ chunks $B_1 \dots B_T$ and $C_{i,1} \dots C_{i,T}$
+  \item $\forall i,j \in [1,T]: A_i, B_j \rightarrow C_{i,j}$
+  \item $\forall i \in [1,T]:$ concatenate all chunks $C_{i,j}$ along $n_0$ to $C_i$
+  \item concatenate all chunks $C_i$ along $m_0$ to $C$
+\end{enumerate}
+
+Assuming that $A$ and $B$ share a k dimension $k_0$ the expression is equivalent to:
+\begin{enumerate}
+  \item cut $A$ and $B$ along $k_0$ int $T \in \mathbb{N}$ chunks $A_1 \dots A_T$ and $B_1 \dots B_T$
+  \item create $T$ tensors of the same shape as $C$ that we call $C_1 \dots C_T$
+  \item $\forall i \in [1,T]: A_i, B_i \rightarrow C_i$
+  \item add all tensors $C_i$ elementwise to $C$
+\end{enumerate}
+
 
 \subsection{einsum\_ir}
 \label{sec:einsum_ir}
-
-\begin{figure}[ht]
-  \centering{\includegraphics[width=0.95\textwidth]{gflops_threads.png}}
-  \caption{
-    Performance of einsum\_ir on an Nvidia Grace CPU Superchip.
-    Grace consists of 2 72-core CPUs connected via NVLink.
-    The contraction used is $m_0c_0k_0k_1m_1, n_0c_0k_0n_0n_1 \rightarrow m_0n_0c_0n_1m_1$ with $|c_0|=2$, $|m_0|=|n_0|=|k_0|$ and $|m_1|=|n_1|=|k_1|=70$.
-  }
-  \label{fig:perf_threads}
-\end{figure}
 
 \texttt{einsum\_ir}\cite{einsum_ir} is a software to evaluate a series of einsum expressions expressed in tree form.
 An example for an einsum tree is $[A,B\rightarrow C],D \rightarrow E$.
 My work builds on top of this software, using their implementation of a binary tensor contraction $A,B \rightarrow C$ as local primitive for my algorithm.
 \texttt{einsum\_ir} already implements shared memory parallelization with OpenMP\cite{openMP}, so it can already exploit all CPU cores on a single NUMA domain.
-Its performance is currently not scaling well across more than one CPU, as seen in Figure \ref{fig:perf_threads}.
-The performance drops as soon as the threads of the second CPU get used, as seen in the sharp decline after 72 threads and Grace.
-This thesis provides algorithms for a secondary distributed memory parallelization to improve scaling across CPUs.
 An important note for the current binary tensor contraction interface is that it expects all tensors, both input and output, to be stored in contiguous memory.
+
+\subsection{MPI}
+
+As a tool for distributed memory parallelization we will use MPI.
+It is a standard for distributed memory parallelization libraries like OpenMPI and MPICH.
+We will only use point-to-point communication where one process sends data directly to another.

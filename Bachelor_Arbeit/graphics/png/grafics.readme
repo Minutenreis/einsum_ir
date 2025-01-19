@@ -1,2 +1,0 @@
-all the gflops_x.png and speedup_x.png files are generated from dist_x_100b.csv (100 measurements, m0=n0=k0= {2,4,...,128}, m1=n1=k1=70, c0=2)
-all the gflops_x_10.png and speedup_x_10.png files are generated from dist_x_10.csv (10 measurements, m0=n0=k0={2,4,8,16,32,64,96,128,180,256}, m1=n1=k1=70, c0=2)
