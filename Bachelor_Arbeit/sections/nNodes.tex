@@ -27,7 +27,7 @@ They will also generally have a higher compute intensity enabling a high through
 These assumptions indicate that the proposed algorithms need a minimum tensor size to show improvements over the base \texttt{einsum\_ir} implementation.
 
 Assumption 4 is merely necessary to simplify the algorithms worked on for this paper.
-Should assumption 4 not hold true, for example if a dimension $o$ with $|o|=14$ gets split across $p=4$ processes, the data could be distributed as $4 4 3 3$ or $4 4 4 2$.
+Should assumption 4 not hold true, for example if a dimension $o$ with $|o|=14$ gets distributed across $p=4$ processes, the data could be distributed as $4 4 3 3$ or $4 4 4 2$.
 In either case each communication and contraction would merely need at most four variants depending on both input tensor states, either having a "full" chunk with $|o'|=4$ or a "partial" chunk with either $|o''|=3$ or $|o''|=2$.
 The last assumption is needed as some of the following algorithms use an extra communication thread.
 This thread is solely responsible for pushing all communication and feeding the computation threads continuously with data to process.
@@ -193,21 +193,29 @@ Since the initial tensor $B_i$ may no longer be moved now, this takes an additio
 \end{algorithm}
 
 
-%todo: check writing
+Imagine $A$ and $B$ are distributed over a k dimension $k_0$, $C$ is distributed over an m dimension $m_0$ and $B$ has an n dimension $n_0$.
+As described in \ref{sec:einsum_expr} each process $i$ could just compute its partial update $A_i, B_i \rightarrow C_i$ and then add them together with the other processes.
+This means that each process has to hold a partial update for all values in the output tensor.
+To reduce the memory footprint we augment the algorithm by calculating only chunks of the partial updates of $C$ by cutting it along $n_0$.
+The basic idea is that each process gets a partial chunk from the next process, adds its own update on top and then sends the update to the previous process, employing a ring like communication scheme as shown in Figure \ref{fig:m_n_algo_b}.
+If each process starts with the chunk of its next neighbour, each process ends with its own chunks of the output tensor.
+To overlap computation and communication we further cut each chunk in half over $m_0$, we will call these subchunks.
+This enables each process to calculate a subchunk in a step while sending the last subchunk it calculated to the previous process and get the next chunk its needs to calculate from the next process.
+An example of how this would look from the perspective of process $0$ is seen in Figure \ref{fig:k_algo_a}.
+We use the output chunk as memory during the algorithm to save on memory needs as seen in Figure \ref{fig:k_algo_b} as the two connected subchunks.
+We still need a third subchunk so we can simultaneously send the last update, calculate the current one and receive the next one.
+To ensure the updates to end in the output tensor and not in the additional memory, we will use the observation that the roles of the subchunk changes in each step in the order $\texttt{recv} \rightarrow \texttt{comp} \rightarrow \texttt{send} \rightarrow \texttt{recv}$ and that after three steps each subchunk has the same role again.
+With that in mind we just need to know the end state we want, which is the bottom left one where the first subchunk of the output chunk gets calculated in the second to last step and the second subchunk gets calculated in the last one, and the number of steps, which is $2 \cdot T$.
+With that information the role each subchunks starts with is just determinable by a module calculation, as seen in Algorithm \ref{alg:k_pseudocode}.
 
-If a tensor contraction $A,B \rightarrow C$ shares a dimension between both input tensor, but not in the output tensor, we will call it a k dimension.
-Imagine $A$ and $B$ share a k dimension $k_0$.
-Contracting an expression $A,B \rightarrow C$ is the same as splitting $A$ and $B$ along $k_0$ into p chunks $A_0\dots A_{p-1}$ and $B_0\dots B_{p-1}$.
-If we define $C_i$ as the result from $A_i,B_i \rightarrow C_i$, $C=\sum{C_i}$.
-To receive a distributed output tensor we would have to split $C$ into $p$ chunks $C_0\dots C_{p-1}$ again.
-Instead of first computing the whole of C on each process, we can compute partial sums of the output tensors $C_j$, where 
-$C_j = \sum_{i=0}^{p-1} C_{i,j}$.
-Each process $j$ can compute all updates $C_{0,j}\dots C_{p-1,j}$.
-To end each process on its chunk $C_j$ we imagine each process adding its partial sum $C_{i,j}$ to an existing partial sum of $C_i$ and then communicating this partial sum to its previous neighbour $j+p-1 \mod p$.
-If each process starts adding upon $C_{j+1}$, it will end up with $C_j$ after all processes have added all partial sums to $C_j$.
-This $C_j$ may be split across any arbitrary dimension.
+In the implementation this algorithm has additional restrictions.
+Since the contraction interface only works on contiguous memory $m_0$ has to be the outermost dimension of $A$ and $C$ and $n_0$ has to be the outermost dimension of $B$.
+If strided tensors are supported in the future the restriction on $n_0$ would cease to exist and as long as the additional memory is allowed to be a whole chunk instead of just a subchunk the one on $m_0$ would also be irrelevant.\\
+It should also be noted that this algorithm only works under the assumption that the C tensor as input is empty, since otherwise we cannot use it during this algorithm as extra memory.
+Should that be the case a slightly different algorithm would likely be preferable, where each process only calculates its own partial updates to a subchunk and then sends them as a reduction to the process which holds the output chunk in the next step.
+This needs $|C|$ additional addition operations and needs a full chunk of additional memory so it can hold two subchunks at a time.
 
-If we want to overlap communication and computation in an implementation we have to slightly adjust the algorithm.
-If we compute partial updates on all of $C_j$ each process has to wait communicating the partial updates until the computation is done.
-Instead, each process should compute half of $C_j$ and already communicate that part while it computes the second half of the partial updates upon it.
-Doing this we can continuously contract on each process.
+As a variation on this algorithm we could imagine an algorithm with the roles of $m_0$ and $n_0$ swapped.
+This was not explored as the two inputs can be swapped for the same effect.
+We could also cut $C$ and the respective input tensor over just one m or one n dimension $2 \cdot T$ times.
+This would achieve the same basic algorithm and might be preferable if one dimension is much larger than the other.
