@@ -39,7 +39,7 @@ With those assumptions we will conceive three algorithms:
 
 \begin{figure}[ht]
     \centering\includegraphics[width=0.3\textwidth]{dist_c.png} 
-    \caption{Visualization of the distributed c algorithm for the contraction $cmk,ckn \rightarrow cmn$; 
+    \caption{Visualization of the Algorithm \ref{alg:c_pseudocode} for the contraction $cmk,ckn \rightarrow cmn$; 
     each color represents a process and the data they hold; 
     since the tensors are distributed along the same c dimension, each node can locally contract its chunks to generate its chunk of the output tensor.}
     \label{fig:c_algo}
@@ -61,6 +61,31 @@ This algorithm is the best case since no communication has to occur and cutting 
 
 \subsection{Distributed m and n Dimensions}
 
+
+\begin{figure}[ht]
+    \centering
+    \begin{subfigure}[t]{0.7\textwidth}
+        \centering
+        \includegraphics[width=1\textwidth]{dist_m_n.png}
+        \subcaption{distributed m and n algorithm}
+        \label{fig:m_n_algo_a}
+    \end{subfigure}
+    ~
+    \begin{subfigure}[t]{0.25\textwidth}
+        \centering\includegraphics[width=1\textwidth]{ring.pdf}
+        \subcaption{communication ring}
+        \label{fig:m_n_algo_b}
+    \end{subfigure}
+    
+    \caption{Visualization of Algorithm \ref{alg:m_n_pseudocode} for the contraction $mk,kn\rightarrow mn$; 
+    each color represents a process and the data they hold;\\
+    \ref{fig:m_n_algo_a} shows how in each step a chunk $C_{i,j}$ of the output gets calculated while the arrows show which data each process will acquire next, being coded by the arrows tip and the processes colour.\\
+    \ref{fig:m_n_algo_b} shows the ring like communication setup where each process only communicates to its immediate higher and lower rank.
+    }
+    \label{fig:m_n_algo}
+\end{figure}
+    
+
 \begin{algorithm}[ht]
         \begin{algorithmic}
         \Require $i = \texttt{mpi\_rank}, A_i, B_i$
@@ -77,35 +102,29 @@ This algorithm is the best case since no communication has to occur and cutting 
         \State \indent $\texttt{comp\_buffer} \gets \texttt{recv\_buffer}$
         \State $C_i \gets \texttt{concat}(C_{i,0}\dots C_{i,p})$
     \end{algorithmic}
-    \caption{Distributed m/n contraction}
+    \caption{Distributed m and n contraction}
     \label{alg:m_n_pseudocode}
 \end{algorithm}
 
-%todo: reword algorithm (?) and double check which variant I am describing in text (m_n_out_n or m_n_out_m)
-
-Imagine $A$ and $C$ share an m dimension $m_0$ and $B$ and $C$ share an n dimension $n_0$.
-Contracting an expression $A,B \rightarrow C$ is then the same as splitting $A$ along $m_0$ into $p$ chunks $A_0\dots A_{p-1}$ and $B$ along $n_0$ into $p$ chunks $B_0\dots B_{p-1}$.
-We can imagine $C$ then as the concatenation of $C_0\dots C_p$ chunks split along the $m_0$ dimension and $C_i$ for $0 \leq i \leq p$ as the concatenation of $C_{i,0} \dots C_{i,p}$ along $n_0$.
-We can compute each $C_{i,j}$ as $A_i,B_j \rightarrow C_{i,j}$.
-To calculate a chunk $C_i$ a process needs all of $A$.
-Instead of executing an \texttt{allgather} on $A$ we will calculate $C_i$ stepwise.
-In each step each process will contract one part $C_{i,j}$ of $C_i$ as $A_i,B_j \rightarrow C_{i,j}$.
-Simultaneously each process will get a new chunk $B_{j+1}$ from their neighbour with a higher rank in a ring, so the process with the highest rank gets its chunk from the process with rank 0.
-To enable both the contraction and the communication of the new chunk to occur simultaneously each process needs extra memory with the size of one chunk of $B$ and employ an extra communication thread to fulfill the communication on that extra chunk.
-Since we assume all tensors to be predistributed, each process will begin with its diagonal part $C_{i,i}$ where i equals the rank of the process.
-Following the above algorithm each process will compute $C_{i,i}, \dots C_{i,p-1},C_{i,0},\dots,C_{i,i-1}$.
-After we concatenate those chunks $C_{0,i}\dots C_{p-1,i}$ to $C_i$ our algorithm is done and $C$ is distributed along $n_0$.
+Imagine $A$ and $C$ are distributed over an m dimension $m_0$ and $B$ is distributed over an n dimension $n_0$.
+As described in \ref{sec:einsum_expr} we can calculate $C$ by contracting chunks $C_{i,j}$ out of $A_i$ and $B_j$ and then concatenating them over $n_0$ to end with $C$ distributed over $m_0$.
+This is the first algorithm we will employ a ringlike communication scheme.
+As with the master worker algorithm each process employs a dedicated communication thread.
+This simply means that each process $i$ can only communicate with process $i-1$, called previous process, and process $i+1$, called next process.
+Each process $i$ starts by contracting its local chunks $A_i$ and $B_i$ to calculate $C_{i,i}$.
+Simultaneously each process sends its chunk $B_i$ to the previous process and receives the chunk $B_{i+1}$ from the next process.
+This repeats $p$ times after which all chunks of $C_{i}$ are calculated on each process $i$ and get concatenated to $C_i$.
 
 In the implementation we can make the final concatenation implicit as long as we contract each chunk $C_{i,j}$ already with the correct strides into the output tensor $C_i$.
 Due to limitations in the binary contraction described in Section \ref{sec:einsum_ir} this is only possibly should each chunk $C_{i,j}$ be contiguous in $C_i$.
 To fulfill that the implementation has to restrict the $m_0$ dimension to be the outermost dimension of $C$.
 
-We could also consider another very similar algorithm where each process gets a chunk $A_i$ in each step instead of $B_j$.
+We could also consider another very similar algorithm where chunks of $A$ get sent and the final $C$ is distributed over $n_0$ instead.
 Such an algorithm is omitted here, since the same effect can be achieved by swapping the input tensors as $A' \coloneqq B$ and $B' \coloneqq A$, which results in $A',B' \rightarrow C$.
 
 The algorithm employs a ring-like communication pattern to reduce memory usage.
-Instead of moving all the tensors in each time step, one could imagine an algorithm where each process keeps its chunk $B_i$ and sends them directly to whichever process that needs it.
-That comes with the problem of still needing one tensor to contract on and another to handle the communication at the same time.
+Instead of moving all the tensors in each time step, one could imagine an algorithm where each process keeps its chunk $B_i$ and sends them directly to each other process.
+Each process still needs one tensor to contract on and another to handle the communication at the same time.
 Since the initial tensor $B_i$ may no longer be moved now, this takes an additional buffer of size $|B_i|$.
 
 \subsection{Distributed k Dimension}
