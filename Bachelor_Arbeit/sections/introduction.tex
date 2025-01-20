@@ -10,8 +10,8 @@ This enables additional performance gains by changing the execution order of con
 The current version of \texttt{einsum\_ir} exhibits bad scaling behavior if more than one NUMA domain is used.
 It also currently cannot use multiple nodes at all to speed up the contraction.
 
-The objective of this thesis is the creation of a distributed memory parallelization layer with MPI to improve \texttt{einsum\_ir}'s scaling across multiple NUMA domains and enable the use of multiple nodes to speed up the contraction.
-To achieve that objective I developed four algorithms, one master-worker algorithm specifically aimed at dual socket systems and three algorithms that can scale to any number of NUMA domains and/or nodes.
+The contribution of this thesis is the creation of a distributed memory parallelization layer with MPI to improve \texttt{einsum\_ir}'s scaling across multiple NUMA domains and enable the use of multiple nodes to speed up the contraction.
+I achieved that by developing four algorithms, one master-worker algorithm specifically aimed at dual socket systems and three algorithms that can scale to any number of NUMA domains and/or nodes.
 A fundamental design aspect in all these algorithms is overlapping computation and communication with a dedicated communication thread to reduce idle times of all threads.
 The algorithms are implemented in C++ and their performance tested on dual socket systems.
 The tests show the promising performance of all algorithms for large enough tensor contractions.

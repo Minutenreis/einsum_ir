@@ -199,18 +199,20 @@ The basic idea is that each process gets a partial chunk from the next process, 
 If each process starts with the chunk of its next neighbour, each process ends with its own chunks of the output tensor.
 To overlap computation and communication we further cut each chunk in half over $m_0$, we will call these subchunks.
 This enables each process to calculate a subchunk in a step while sending the last subchunk it calculated to the previous process and get the next chunk its needs to calculate from the next process.
+
 An example of how this would look from the perspective of process $0$ is seen in Figure \ref{fig:k_algo_a}.
 We use the output chunk as memory during the algorithm to save on memory needs as seen in Figure \ref{fig:k_algo_b} as the two connected subchunks.
 We still need a third subchunk so we can simultaneously send the last update, calculate the current one and receive the next one.
 To ensure the updates to end in the output tensor and not in the additional memory, we will use the observation that the roles of the subchunk changes in each step in the order $\texttt{recv} \rightarrow \texttt{comp} \rightarrow \texttt{send} \rightarrow \texttt{recv}$ and that after three steps each subchunk has the same role again.
-With that in mind we just need to know the end state we want, which is the bottom left one where the first subchunk of the output chunk gets calculated in the second to last step and the second subchunk gets calculated in the last one, and the number of steps, which is $2 \cdot T$.
+With that in mind we just need to know the end state we want, which is the bottom left state where the first subchunk of the output chunk gets calculated in the second to last step and the second subchunk gets calculated in the last step, and the number of steps, which equal $2 \cdot T$.
 With that information the role each subchunks starts with is just determinable by a module calculation, as seen in Algorithm \ref{alg:k_pseudocode}.
 
 In the implementation this algorithm has additional restrictions.
 Since the contraction interface only works on contiguous memory $m_0$ has to be the outermost dimension of $A$ and $C$ and $n_0$ has to be the outermost dimension of $B$.
-If strided tensors are supported in the future the restriction on $n_0$ would cease to exist and as long as the additional memory is allowed to be a whole chunk instead of just a subchunk the one on $m_0$ would also be irrelevant.\\
-It should also be noted that this algorithm only works under the assumption that the C tensor as input is empty, since otherwise we cannot use it during this algorithm as extra memory.
-Should that be the case a slightly different algorithm would likely be preferable, where each process only calculates its own partial updates to a subchunk and then sends them as a reduction to the process which holds the output chunk in the next step.
+If strided tensors are supported in the future the restriction on $n_0$ would cease to exist and as long as the additional memory is allowed to be a whole chunk instead of just a subchunk the one on $m_0$ would also be irrelevant.
+
+It should also be noted that this algorithm only works under the assumption that we contract a new $C$ tensor and do not add onto an existing one, as we could not use itas extra memory in that case.
+Instead, a slightly different algorithm would likely be preferable, where each process only calculates its own partial updates to a subchunk and then sends them as a reduction to the process which holds the output chunk in the next step.
 This needs $|C|$ additional addition operations and needs a full chunk of additional memory so it can hold two subchunks at a time.
 
 As a variation on this algorithm we could imagine an algorithm with the roles of $m_0$ and $n_0$ swapped.
