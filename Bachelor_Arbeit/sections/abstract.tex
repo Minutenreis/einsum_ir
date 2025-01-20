@@ -1,21 +1,32 @@
 \thispagestyle{empty} 
 
-\section*{Abstract}
+\vbox{
+    \begin{minipage}[t][0.5\textheight][t]{\textwidth}
+      \section*{Abstract}
 
-Tensor contractions are critical to the efficient execution of machine learning models.
-Einsum expressions offer a succinct and declarative way to express tensor contractions.
-\texttt{einsum\_ir}  is a library to compute a series of einsum expressions  efficiently on a single compute unit, but its scaling across NUMA domains is lacking.
-This thesis proposes four algorithms to accelerate the \texttt{einsum\_ir} with distributed memory parallelism to improve the performance on multi socket systems and enable scaling across multiple nodes.
-The algorithms outperform the existing shared memory parallelization for large enough tensors on dual socket systems such as an Nvidia Grace CPU Superchip.
+      Tensor contractions are critical to the efficient execution of machine learning models.
+      Einsum expressions offer a succinct and declarative way to express tensor contractions.
+      \texttt{einsum\_ir}  is a library to compute a series of einsum expressions  efficiently on a single compute unit, but its scaling across NUMA domains is lacking.
+      This thesis proposes four algorithms to accelerate the \texttt{einsum\_ir} with distributed memory parallelism to improve the performance on multi socket systems and enable scaling across multiple nodes.
+      The algorithms outperform the existing shared memory parallelization for large enough tensors on dual socket systems such as an Nvidia Grace CPU Superchip.
+    \end{minipage}
+
+    \nointerlineskip
+    \begin{minipage}[b][0.5\textheight][t]{\textwidth}
+        \begin{otherlanguage}{ngerman}
+          \section*{Kurzfassung}
+          
+          Tensor Kontraktionen sind für die effiziente Ausführung von maschinellem Lernen entscheidend.
+          Einsum Ausdrücke bieten dabei eine prägnante und deklarative Möglichkeit Tensor Kontraktionen, um Tensor Kontraktionen wie auszudrücken.
+          \texttt{einsum\_ir} ist eine Bibliothek um eine Serie an Einsum Ausdrücken effizient auf einer einzelnen Recheneinheit auszuwerten, aber es skaliert unzureichend gut über NUMA-Domänen hinweg.
+          In dieser Arbeit werden vier Algorithmen zur Beschleunigung von \texttt{einsum\_ir} mit verteiltem Speicherparallelität vorgeschlagen, um die Leistung auf Mehr-Sockel-Systemen zu verbessern und eine Skalierung über mehrere Rechenknoten zu ermöglichen.
+          Die Algorithmen übertreffen die bestehende verteilter Speicher Parallelisierung für ausreichend große Tensoren auf Zwei-Sockel-Systemen wie dem Nvidia Grace CPU Superchip.
+          \end{otherlanguage}
+    \end{minipage}
+}
+
+
 
 \thispagestyle{empty} 
 
-\begin{otherlanguage}{ngerman}
-\section*{Kurzfassung}
 
-Tensor Kontraktionen sind für die effiziente Ausführung von maschinellem Lernen entscheidend.
-Einsum Ausdrücke bieten dabei eine prägnante und deklarative Möglichkeit Tensor Kontraktionen, um Tensor Kontraktionen wie auszudrücken.
-\texttt{einsum\_ir} ist eine Bibliothek um eine Serie an Einsum Ausdrücken effizient auf einer einzelnen Recheneinheit auszuwerten, aber es skaliert unzureichend gut über NUMA-Domänen hinweg.
-In dieser Arbeit werden vier Algorithmen zur Beschleunigung von \texttt{einsum\_ir} mit verteiltem Speicherparallelität vorgeschlagen, um die Leistung auf Mehr-Sockel-Systemen zu verbessern und eine Skalierung über mehrere Rechenknoten zu ermöglichen.
-Die Algorithmen übertreffen die bestehende verteilter Speicher Parallelisierung für ausreichend große Tensoren auf Zwei-Sockel-Systemen wie dem Nvidia Grace CPU Superchip.
-\end{otherlanguage}
