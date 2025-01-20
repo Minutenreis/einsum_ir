@@ -37,7 +37,6 @@ Einsum expressions can also describe the contractions of more than 2 tensors\cit
 %todo: can I just recommend people to look at resources such as "Einsum is all you need" for an advanced introduction?
 Instead of writing $D_{ij} = \sum_{k}\sum_{l}A_{ik}B_{jkl}C_{il}$ it is expressed as $A_{ik}B_{jkl}C_{il} \rightarrow D_{ij}$.
 All expression in the rest of this thesis are written as simplified einsum expression, either written as $A,B\rightarrow C$, leaving out the indices, or as $pqrs,tuqvr \rightarrow pstuv$, leaving out the tensor variables.
-The evaluation of einsum expression is supported in the popular frameworks like Torch\cite{torch}, Numpy\cite{numpy} and Tensorflow\cite{tensorflow}.
 
 We will make a few observations about the different dimension types introduced in \ref{sec:tensorContractions} in the einsum notation for the general expression $A,B \rightarrow C$:
 
