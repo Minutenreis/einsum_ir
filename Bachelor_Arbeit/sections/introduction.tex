@@ -5,18 +5,14 @@ Their fast execution is paramount for these applications.
 Einsum expressions are a very succinct way to describe tensor contractions.
 Their evaluation is supported in many popular libraries like Torch\cite{torch}, Numpy\cite{numpy} or TensorFlow \cite{tensorflow}.
 A slightly different approach is presented by \texttt{einsum\_ir}\cite{einsum_ir}:
-Instead of inputting individual einsum expressions a user inputs a whole series of contractions as einsum trees.
+Instead of inputting individual einsum expressions a user inputs a whole series of contractions as an einsum tree.
 This enables additional performance gains by changing the execution order of contractions and the dimension order of intermediate tensors, which lets \texttt{einsum\_ir} reduce the amount of transpose operations significantly.
 The current version of \texttt{einsum\_ir} exhibits bad scaling behavior if more than one NUMA domain is used.
 It also currently cannot use multiple nodes at all to speed up the contraction.
 
 The contribution of this thesis is the creation of a distributed memory parallelization layer with MPI to improve \texttt{einsum\_ir}'s scaling across multiple NUMA domains and enable the use of multiple nodes to speed up the contraction.
-I achieved that by developing four algorithms, one master-worker algorithm specifically aimed at dual socket systems and three algorithms that can scale to any number of NUMA domains and/or nodes.
+I achieved that by developing four algorithms, one master-worker algorithm specifically aimed at dual socket systems and three algorithms that can scale to any number of NUMA domains and/or nodes, where data gets kept distributed throughout the runtime.
 A fundamental design aspect in all these algorithms is overlapping computation and communication with a dedicated communication thread to reduce idle times of all threads.
-The algorithms are implemented in C++ and their performance tested on dual socket systems.
-The tests show the promising performance of all algorithms for large enough tensor contractions.
-
-This thesis also includes an outlook on which steps need to be taken in order to include these algorithms into \texttt{einsum\_ir}'s regular tree compilation.
-
-%TODO: WHAT THE HELL DO I WRITE HERE?!
+The algorithms are implemented in C++ and their performance are tested on dual socket systems.
+The tests showcase the promising performance of all algorithms for large enough tensor contractions.
 

@@ -1,17 +1,12 @@
-\section{Scaling up the Number of Processes}
+\section{Distributed Algorithms}
 \label{sec:n_nodes}
 
-The previously discussed master-worker algorithm expects all input tensors before and the output tensor after a contraction to reside within a single master process.
-Imagine we now have $p$ processes.
-The master process is now involved in sending and receiving $\frac{p-1}{p}$ parts of the tensors in the contraction.
-Meanwhile, the worker processes each only communicate $\frac{1}{p}$ parts of the tensors with the master.
-The larger $p$ gets the more unbalanced communication in the master-worker algorithm gets.
-It also might run into memory issues should the total size of all tensors exceed the master process' memory size.
-
+The previously discussed master-worker algorithm expects all input tensors before a contraction and the output tensor after a contraction to reside within a single master process.
+This introduces unnecessary data transfers for tensor contractions within the tree, as the output tensor must be further contracted and for that has to be communicated again to the worker.
 Instead, let us consider algorithms that work on distributed tensors as input and output.
-Such algorithms allow the communication load to be balanced across all processes.
+We formulate the algorithms in a way that they can scale up the number of processes, so we could use them for scaling across nodes, though our tests are be restricted to dual socket systems.
 
-As basis for such an algorithm, we make the following assumptions:
+As basis for such algorithms, we make the following assumptions:
 \begin{enumerate}
     \item input tensors are predistributed across all processes
     \item output tensors may stay distributed
@@ -20,26 +15,27 @@ As basis for such an algorithm, we make the following assumptions:
     \item each process has multiple threads.
 \end{enumerate}
 
-Given sufficiently large einsum trees with sufficiently large tensors the initial predistribution of the input tensors and the final gather of the output tensor will consume a negligible amount of time compared to the evaluation of the tree.
-They will also generally have a higher compute intensity enabling a high throughput despite the lower network speed compared to local memory speeds.
+Given sufficiently large einsum trees with sufficiently large tensors the initial predistribution of the input tensors and the final gather of the output tensor consume a negligible amount of time compared to the evaluation of the tree.
+Larger tensors also generally have a higher compute intensity enabling a high throughput despite the lower interconnect speeds compared to local memory speeds.
 These assumptions indicate that the proposed algorithms need a minimum tensor size to show improvements over the base \texttt{einsum\_ir} implementation.
 
 Assumption 4 is merely necessary to simplify the algorithms worked on for this paper.
-Should assumption 4 not hold true, for example if a dimension $o$ with $|o|=14$ gets distributed across $p=4$ processes, the data could be distributed as $4 4 3 3$ or $4 4 4 2$.
-In either case each communication and contraction would merely need at most four variants depending on both input tensor states, either having a "full" chunk with $|o'|=4$ or a "partial" chunk with either $|o''|=3$ or $|o''|=2$.
+Should assumption 4 not hold true, for example if a dimension $o$ with $|o|=14$ gets distributed across $p=4$ processes, the data could be distributed across processes with the processes $p_1,p_2,p_3,p_4$ receiving $4,4,3,3$ or $4,4,4,2$ parts respectively.
+In either case each communication and contraction would merely need at most four variants depending on both input tensor states, either having a "full" chunk with $|o'|=4$ parts or a "partial" chunk with either $|o''|=3$ or $|o''|=2$ parts.
+
 The last assumption is needed as some of the following algorithms use an extra communication thread.
 This thread is solely responsible for pushing all communication and feeding the computation threads continuously with data to process.
-This design was chosen as to overlap communication with computation to minimize waiting times due to network speeds.
+This design was chosen to facilitate overlapping communication with computation and should minimize waiting times for the computing threads.
 
-With those assumptions we will conceive three algorithms:
+With those assumptions we conceive three algorithms:
 
-\subsection{Distributed c Dimension}
+\subsection{Distributed c-Dimension Algorithm}
 
 \begin{figure}[ht]
     \centering\includegraphics[width=0.3\textwidth]{dist_c.png} 
     \caption{Visualization of the Algorithm \ref{alg:c_pseudocode} for the contraction $cmk,ckn \rightarrow cmn$; 
     each color represents a process and the data they hold; 
-    since the tensors are distributed along the same c dimension, each node can locally contract its chunks to generate its chunk of the output tensor.}
+    since the tensors are distributed along the same c-dimension, each node can locally contract its chunks to generate its chunk of the output tensor.}
     \label{fig:c_algo}
     \end{figure}
 
@@ -49,15 +45,16 @@ With those assumptions we will conceive three algorithms:
     \Ensure $C_i$
     \State $A_i, B_i \rightarrow C_i$
 \end{algorithmic}
-\caption{Distributed c contraction}
+\caption{Distributed c-dimension contraction}
 \label{alg:c_pseudocode}
 \end{algorithm}
 
-Imagine $A$,$B$ and $C$ are distributed over a c dimension $c_0$.
-As described in \ref{sec:einsum_expr} in such a case each process has to only contract its local chunks.
-This algorithm is the best case since no communication has to occur and cutting a tensor among its c dimension keeps its compute intensity.
+Imagine $A$,$B$ and $C$ are distributed over a c-dimension $c_0$.
+In such a case each process has to only contract its local chunks as already described in Section \ref{sec:einsum_expr}.
+This algorithm represents the best case as no communication has to occur.
+Cutting a tensor among its c-dimension keeps its compute intensity in contrast to cutting any other dimension, where the compute intensity falls.
 
-\subsection{Distributed m and n Dimensions}
+\subsection{Distributed m- and n-Dimensions Algorithm}
 
 
 \begin{figure}[ht]
@@ -65,7 +62,7 @@ This algorithm is the best case since no communication has to occur and cutting 
     \begin{subfigure}[t]{0.7\textwidth}
         \centering
         \includegraphics[width=1\textwidth]{dist_m_n.png}
-        \subcaption{distributed m and n algorithm}
+        \subcaption{distributed m- and n-dimension algorithm}
         \label{fig:m_n_algo_a}
     \end{subfigure}
     ~
@@ -77,7 +74,7 @@ This algorithm is the best case since no communication has to occur and cutting 
     
     \caption{Visualization of Algorithm \ref{alg:m_n_pseudocode} for the contraction $mk,kn\rightarrow mn$; 
     each color represents a process and the data they hold;\\
-    \ref{fig:m_n_algo_a} shows how in each step a chunk $C_{i,j}$ of the output gets calculated while the arrows show which data each process will acquire next, being coded by the arrows tip and the processes colour.\\
+    \ref{fig:m_n_algo_a} shows how in each step a chunk $C_{i,j}$ of the output gets calculated while the arrows show which data each process will acquire in the next step, being coded by the arrows tip and the processes colour.\\
     \ref{fig:m_n_algo_b} shows the ring like communication setup where each process only communicates to its immediate higher and lower rank.
     }
     \label{fig:m_n_algo}
@@ -88,8 +85,8 @@ This algorithm is the best case since no communication has to occur and cutting 
         \begin{algorithmic}
         \Require $i = \texttt{mpi\_rank}, A_i, B_i$
         \Ensure $C_i$
-        \State $\texttt{next} = (i+1) \mod p$
-        \State $\texttt{prev} = (i+p-1) \mod p$
+        \State $\texttt{next} = p_{(i+1) \mod p}$
+        \State $\texttt{prev} = p_{(i+p-1) \mod p}$
         \State $\texttt{comp\_buffer} \gets B_i$
         \State  $\text{for } j \text{ in } 0\dots p - 1 \text{ do:}$
         \State \indent $k \gets (i + j) \mod p$
@@ -104,33 +101,35 @@ This algorithm is the best case since no communication has to occur and cutting 
     \label{alg:m_n_pseudocode}
 \end{algorithm}
 
-Imagine $A$ and $C$ are distributed over an m dimension $m_0$ and $B$ is distributed over an n dimension $n_0$.
-As described in \ref{sec:einsum_expr} we can calculate $C$ by contracting chunks $C_{i,j}$ out of $A_i$ and $B_j$ and then concatenating them over $n_0$ to end with $C$ distributed over $m_0$.
-This is the first algorithm we will employ a ringlike communication scheme.
-As with the master worker algorithm each process employs a dedicated communication thread.
-This simply means that each process $i$ can only communicate with process $i-1$, called previous process, and process $i+1$, called next process.
-Each process $i$ starts by contracting its local chunks $A_i$ and $B_i$ to calculate $C_{i,i}$.
-Simultaneously each process sends its chunk $B_i$ to the previous process and receives the chunk $B_{i+1}$ from the next process, employing additional memory in the size of another chunk of $B$.
-This repeats $p$ times after which all chunks of $C_{i}$ are calculated on each process $i$ and get concatenated to $C_i$.
+Imagine $A$ and $C$ are distributed over an m-dimension $m_0$ and $B$ is distributed over an n-dimension $n_0$.
+As described in Section \ref{sec:einsum_expr}, we can calculate $C$ by contracting chunks $C_{i,j}$ out of $A_i$ and $B_j$ and then concatenating them over $n_0$ to end with $C$ distributed over $m_0$.
+This is the first algorithm where we employ a ringlike communication scheme.
+As with the master-worker algorithm each process employs a dedicated communication thread.
+This means that each process $p_i$ can only communicate with process $p_{i-1}$, called previous process, and process $p_{i+1}$, called next process.
+Each process $p_i$ starts by contracting its local chunks $A_i$ and $B_i$ to calculate $C_{i,i}$.
+Simultaneously each process sends its chunk $B_i$ to the previous process and receives the chunk $B_{i+1}$ from the next process.
+We use additional memory in size of one chunk $|B_{i+1}|$ to implement the communication.
+This repeats $p$ times after which all chunks $C_{i,j}$ are calculated on each process $p_i$ and get concatenated to $C_i$.
+An example for $p=4$ and the binary contraction $mk, kn \rightarrow mn$ can be seen in Figure \ref{fig:m_n_algo_a}.
 
-In the implementation I omitted the final communication of $B$ chunks, since I assumed that the input tensors would not need to be reused.
-In the case of no reuse, this could slightly speed up the algorithm.
+In the implementation I omitted the final communication of $B$'s chunks, since I assumed that the input tensors would not need to be reused.
+In the case of no reuse, this should slightly speed up the algorithm.
 This assumption no longer holds true if the input tensors need to be used multiple times, such as in inference workloads.
-If that was the case it would also be necessary to copy the final chunk to the input tensor from the additional memory, should the number of processes be uneven.
+If that was the case it would also be necessary to copy the final chunk to the input tensor from the additional memory, provided the number of processes $p$ be uneven.
 
-In the implementation we can make the final concatenation implicit as long as we contract each chunk $C_{i,j}$ already with the correct strides into the output tensor $C_i$.
+We can leave out the final concatenation in the implementation as long as we contract each chunk $C_{i,j}$ already with the correct strides into the output tensor $C_i$.
 Due to limitations in the binary contraction described in Section \ref{sec:einsum_ir} this is only possibly should each chunk $C_{i,j}$ be contiguous in $C_i$.
-To fulfill that the implementation has to restrict the $m_0$ dimension to be the outermost dimension of $C$.
+To fulfill that the implementation has to restrict the $m_0$-dimension to be the outermost dimension of $C$.
 
-We could also consider another very similar algorithm where chunks of $A$ get sent and the final $C$ is distributed over $n_0$ instead.
+We could also consider another very similar algorithm where chunks of $A$ get sent and $C$ is distributed over $n_0$ instead.
 Such an algorithm is omitted here, since the same effect can be achieved by swapping the input tensors as $A' \coloneqq B$ and $B' \coloneqq A$, which results in $A',B' \rightarrow C$.
 
-The algorithm employs a ring-like communication pattern to reduce memory usage.
+The algorithm employs a ring-like communication pattern to reduce memory usage as shown in Figure \ref{fig:m_n_algo_b}.
 Instead of moving all the tensors in each time step, one could imagine an algorithm where each process keeps its chunk $B_i$ and sends them directly to each other process.
 Each process still needs one tensor to contract on and another to handle the communication at the same time.
 Since the initial tensor $B_i$ may no longer be moved now, this takes an additional buffer of size $|B_i|$.
 
-\subsection{Distributed k Dimension}
+\subsection{Distributed k-Dimension Algorithm}
 
 \begin{figure}[ht]
     \centering
@@ -172,14 +171,14 @@ Since the initial tensor $B_i$ may no longer be moved now, this takes an additio
     \begin{algorithmic}
     \Require $i = \texttt{mpi\_rank}, A_i, B_i, j$
     \Ensure $C_i$
-    \State $\texttt{next} = (i+1) \mod p$
-    \State $\texttt{prev} = (i+p-1) \mod p$
+    \State $\texttt{next} = p_{(i+1) \mod p}$
+    \State $\texttt{prev} = p_{(i+p-1) \mod p}$
     \State $\texttt{send\_buffer} \gets \texttt{firstHalf}(C_i)$
     \State $\texttt{comp\_buffer} \gets \texttt{secondHalf}(C_i)$
     \State $\texttt{recv\_buffer} \gets \texttt{new memory}$
     \State $\text{repeat } (p+1) \mod 3 \text{ times} \texttt{ //last contraction on secondHalf}(C_i)$ 
     \State \indent $\texttt{rotate}(\texttt{send\_buffer},\texttt{comp\_buffer},\texttt{recv\_buffer})$
-    \State $A_{i,0}, B_{i,next} \texttt{comp\_buffer}$
+    \State $A_{i,0}, B_{i,(i+1) \mod p} \rightarrow \texttt{comp\_buffer}$
     \State  $\text{for } j \text{ in } 0\dots 2 * p - 1 \text{ do:}$
     \State \indent $ k = j \mod 2 $
     \State \indent $ m = (i + 1 + \frac{j}{2}) \mod p$
@@ -196,31 +195,32 @@ Since the initial tensor $B_i$ may no longer be moved now, this takes an additio
 \end{algorithm}
 
 
-Imagine $A$ and $B$ are distributed over a k dimension $k_0$, $C$ is distributed over an m dimension $m_0$ and $B$ has an n dimension $n_0$.
-As described in \ref{sec:einsum_expr} each process $i$ could just compute its partial update $A_i, B_i \rightarrow C_i$ and then add them together with the other processes.
+Imagine $A$ and $B$ are distributed over a k-dimension $k_0$, $C$ is distributed over an m-dimension $m_0$ and $B$ has an n-dimension $n_0$.
+As described in Section \ref{sec:einsum_expr}, each process $p_i$ could just compute its partial update $A_i, B_i \rightarrow C_i$ and then add them together with the other processes.
 This means that each process has to hold a partial update for all values in the output tensor.
 To reduce the memory footprint we augment the algorithm by calculating only chunks of the partial updates of $C$ by cutting it along $n_0$.
 The basic idea is that each process gets a partial chunk from the next process, adds its own update on top and then sends the update to the previous process, employing a ring like communication scheme as shown in Figure \ref{fig:m_n_algo_b}.
 If each process starts with the chunk of its next neighbour, each process ends with its own chunks of the output tensor.
-To overlap computation and communication we further cut each chunk in half over $m_0$, we will call these subchunks.
-This enables each process to calculate a subchunk in a step while sending the last subchunk it calculated to the previous process and get the next chunk its needs to calculate from the next process.
+To overlap computation and communication we further cut each chunk in half over $m_0$, we call these subchunks.
+This enables each process to calculate a subchunk in each step while sending the last subchunk it calculated to the previous process and get the next chunk it needs from the next process.
 
-An example of how this would look from the perspective of process $0$ is seen in Figure \ref{fig:k_algo_a}.
-We use the output chunk as memory during the algorithm to save on memory needs as seen in Figure \ref{fig:k_algo_b} as the two connected subchunks.
-We still need a third subchunk so we can simultaneously send the last update, calculate the current one and receive the next one.
-To ensure the updates to end in the output tensor and not in the additional memory, we will use the observation that the roles of the subchunk changes in each step in the order $\texttt{recv} \rightarrow \texttt{comp} \rightarrow \texttt{send} \rightarrow \texttt{recv}$ and that after three steps each subchunk has the same role again.
-With that in mind we just need to know the end state we want, which is the bottom left state where the first subchunk of the output chunk gets calculated in the second to last step and the second subchunk gets calculated in the last step, and the number of steps, which equal $2 \cdot T$.
-With that information the role each subchunks starts with is just determinable by a module calculation, as seen in Algorithm \ref{alg:k_pseudocode}.
+An example of how this would look from the perspective of process $p_0$ is seen in Figure \ref{fig:k_algo_a}.
+We use the output chunk as memory during the algorithm to save on memory needs, which are visualized in Figure \ref{fig:k_algo_b} as the two connected subchunks.
+We need additional memory for a third subchunk so we can simultaneously send the last update, calculate the current one and receive the next one.
+This is visualized in \ref{fig:k_algo_b} as the single subchunk next to the connected subchunks.
+To ensure that the updates end in the output tensor and not in the additional memory, we use the observation that the roles of the subchunk changes in each step in the order $\texttt{recv} \rightarrow \texttt{comp} \rightarrow \texttt{send} \rightarrow \texttt{recv}$ and that after three steps each subchunk has the same role again.
+With that in mind we just need to know the end state we want, which is the bottom left state where the first subchunk of the output chunk gets calculated in the second to last step and the second subchunk gets calculated in the last step, and the number of steps, which equal $2 \cdot p$.
+With that information the role each subchunks starts with is just determinable by a modulo calculation, as seen in Algorithm \ref{alg:k_pseudocode}.
 
 In the implementation this algorithm has additional restrictions.
-Since the contraction interface only works on contiguous memory $m_0$ has to be the outermost dimension of $A$ and $C$ and $n_0$ has to be the outermost dimension of $B$.
+Since the contraction interface only works on contiguous memory, $m_0$ has to be the outermost dimension of $A$ and $C$ and $n_0$ has to be the outermost dimension of $B$.
 If strided tensors are supported in the future the restriction on $n_0$ would cease to exist and as long as the additional memory is allowed to be a whole chunk instead of just a subchunk the one on $m_0$ would also be irrelevant.
 
-It should also be noted that this algorithm only works under the assumption that we contract a new $C$ tensor and do not add onto an existing one, as we could not use itas extra memory in that case.
+It should also be noted that this algorithm only works under the assumption that we contract a new $C$ tensor and do not add onto an existing one, as we could not use its extra memory in that case.
 Instead, a slightly different algorithm would likely be preferable, where each process only calculates its own partial updates to a subchunk and then sends them as a reduction to the process which holds the output chunk in the next step.
 This needs $|C|$ additional addition operations and needs a full chunk of additional memory so it can hold two subchunks at a time.
 
 As a variation on this algorithm we could imagine an algorithm with the roles of $m_0$ and $n_0$ swapped.
-This was not explored as the two inputs can be swapped for the same effect.
-We could also cut $C$ and the respective input tensor over just one m or one n dimension $2 \cdot T$ times.
+This was not explored because the two input tensors can be swapped for the same effect.
+We could also cut $C$ and only one input tensor over just one m- or one n-dimension $2 \cdot p$ times.
 This would achieve the same basic algorithm and might be preferable if one dimension is much larger than the other.

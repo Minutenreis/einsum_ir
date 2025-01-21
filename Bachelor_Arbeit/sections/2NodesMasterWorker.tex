@@ -1,6 +1,5 @@
 
-
-\section{Master-Worker Algorithm for two processes}
+\section{Motivation}
 
 \begin{figure}[ht]
   \centering{\includegraphics[width=0.95\textwidth]{gflops_threads.png}}
@@ -13,29 +12,35 @@
   \label{fig:perf_threads}
 \end{figure}
 
-\texttt{einsum\_ir} is scaling well across a single NUMA domain as seen in Figure \ref{fig:perf_threads} before 72 threads.
-As soon as a second NUMA domain gets included, in the Figure \ref{fig:perf_threads} after 72 threads, the performance drops significantly.
-Even at 144 threads the performance is only improved by 24\%.
+\texttt{einsum\_ir} already implements shared memory parallelization with OpenMP\cite{openMP}, so it can already exploit all CPU cores on a single NUMA domain.
+But as shown in Figure \ref{fig:perf_threads} the performance breaks down as soon as more than one NUMA domain is used.
+Even using all threads on Grace improves the performance by merely 24\% over only using one socket.
+The goal of this thesis is to improve this scaling behavior across NUMA domains.
 
-%TODO: NEW BLOCK, THINK BEFORE SUBMITTING THIS
-Before thinking about individual algorithms we should first think about which type of parallelism is appropriate.
-There are three popular parallelism models in machine learning, being data parallelism, pipeline parallelism and tensor parallelism \cite{megatronLM}.
-Data parallelism cannot be applied to individual einsum trees and is specific to the machine learning application.
-Between the remaining pipeline and tensor parallelism I decided to implement the latter.
-Tensor parallelism is more suited towards scaling within a multi socket system as the main drawback, higher communication requirements, are lessened by the faster interconnect speeds between sockets compared to network latencies.
-%TODO: nochmal drüber lesen, sobald ich wieder wach genug bin!
+To achieve this goal we look at four distributed memory algorithms.
+Before going over these algorithms in detail we should look at how other applications parallelize similar workloads.
+Parallelizing tensor operations is essential to machine learning, so we can take lessons from that field.
+The most popular practices to parallelize machine learning workloads are data, tensor and pipeline parallelism \cite{megatronLM}.
+Data parallelism is specific to the training phase of machine learning models, where the weights of a model get updated in parallel.
+We do not want to restrict ourselves to only AI training workloads, so this type is not applicable.
+That leaves tensor and pipeline parallelism.
+Tensor parallelism is generally favored when scaling across a single node \cite{megatronLM}, while pipeline parallelism performs better when scaling across nodes.
+Since our motivation stems from accelerating \texttt{einsum\_ir} on a single execution node primarily, I decided to pursue tensor parallelism.
 
 
-As a first algorithm we will think of a master worker architecture to improve performance across NUMA domains.
-Since the main hardware target were dual socket servers, like the Nvidia Grace CPU Superchip, we will restrict our algorithm to two processes.
-The basic premise of this algorithm is treating the worker as a matrix accelerator where you send parts of the input matrix too and receive the corresponding parts of the output matrix back.
-Since both NUMA domains should ideally be equally fast we will cut all tensor across one dimension c dimension $c_0$ into $|c_0|$ chunks with the master working on the first $\frac{|c_0|}{2}$ as one big contraction and will send the worker thread $|c_0|-\frac{|c_0|}{2}$ single chunks to process.
-To enable the overlap of communication with the other process and contracting the chunks each process uses one of its thread exclusively as communication thread.
-This thread will be solely responsible for communicating the array chunks to each other.
+\section{Master-Worker Algorithm}
 
-From the perspective of the master thread no synchronization between computation and communication threads has to occur.
-The worker threads compute threads however have to wait until their input data is fully assembled before they can start working.
-To minimize the waiting times the computation and communication will go as follows, $A_i$, $B_i$ and $C_i$ will each be the $i$-th chunk contracted on the worker:
+As our first algorithm we think of a master-worker architecture to improve performance across NUMA domains.
+Since the main hardware target were dual socket servers, like the Nvidia Grace CPU Superchip, we restrict our algorithm to two processes.
+This also trivially ensures that the communication is balanced between all processes.
+The basic premise of this algorithm is treating the worker as a matrix accelerator where you send parts of the input matrix to and receive the corresponding parts of the output matrix from.
+Since both NUMA domains should ideally be equally fast we cut all tensor across one c-dimension $c_0$ into $|c_0|$ chunks, with the master working on the first $\left \lceil{\frac{|c_0|}{2}}\right \rceil $ chunks together as one big contraction and send  the remaining  $\left \lfloor{\frac{|c_0|}{2}}\right \rfloor$ chunks to the worker to process them in parallel to the master process.
+To enable the overlap of communicating with the other process and computing the chunks, each process uses one of its thread exclusively as communication thread.
+This thread is solely responsible for communicating the input chunks from the master to the worker and the output chunks from the worker back to the master.
+
+From the perspective of the master thread the communication and compute threads only have to synchronize at the end of the contraction, waiting for the other to finish.
+The worker's compute threads however have to wait until their input data is fully assembled before they can start working.
+To minimize the waiting times the computation and communication goes as follows, with $A_i$, $B_i$ and $C_i$ each being the $i$-th chunk contracted on the worker:
 
 \begin{center}
   \begin{tabular}{ |c|c| } 
@@ -65,10 +70,11 @@ To minimize the waiting times the computation and communication will go as follo
 
 The communication thread of the master matches each \texttt{receive} of the worker with a \texttt{send} and each \texttt{send} of the worker with a \texttt{receive}.
 The workers compute threads have to synchronize with its communication thread after each row.
-To minimize the initial memory allocation on the worker it will only have 2 buffers for each $A$, $B$ and $C$ chunks.
-This is possible since all $A$ and $B$ chunks are only used in the next step after they are received and all $C$ chunks are sent in the next chunk after they are contracted.
+To minimize the initial memory allocation on the worker it only has 2 buffers for $A$, $B$ and $C$ chunks respectively.
+This is possible since all $A$ and $B$ chunks are used in the next step after they are received and all $C$ chunks are sent in the next chunk after they are contracted, leaving each chunk only for two steps in the worker.
 The time in the contraction where the worker does not use its compute threads takes only as long as the time to communicate a chunk of each $A$, $B$ and $C$ (the first and last row in the table), so this time gets reduced the larger $|c_0|$ is.
+This is somewhat restricted by a more granular split also increasing synchronization overheads though.
 It should be noted that the $|c_0|$ dimension has to be the outermost dimension of $A$, $B$ and $C$ in the implementation I developed.
-This is caused by the restriction in the binary contraction interface to only work on contiguous memory as noted in \ref{sec:einsum_ir}.
-To fix this limitation the contraction interface would need to support strided arrays, for example by supplying a pointer and the starts and offsets for each dimension.
-The MPI calls would also need to be adjusted to a custom datatype instead of sending contiguous chunks.
+This is caused by the restriction in the binary contraction interface to only work on contiguous memory as noted in Section \ref{sec:einsum_ir}.
+To fix this limitation the contraction interface would need to support strided tensors, for example by supplying a pointer to the first entry and offsets for each dimension.
+The MPI calls would also need to be adjusted to a custom datatype describing the strided tensors instead of sending contiguous chunks.

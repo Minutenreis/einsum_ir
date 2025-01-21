@@ -5,5 +5,5 @@ First would be rewriting \texttt{einsum\_ir}'s binary contraction implementation
 When this is done there would need to be development work into finding an algorithm of heuristically decide when to distribute computations and when to keep them local, likely depending on the tensor sizes.
 There also needs to be an algorithm to decide which dimensions are best to distribute in any given einsum expression.
 An easy version would be to always distribute the outermost dimension of the output and pull those dimensions to the outermost position in the input tensors.
-This would also omit the distributed k algorithm which showed the worst performance in the examples, since the k dimension would never be the outermost dimension in the output tensor.
+This would also omit the distributed k-dimension algorithm which showed the worst performance in the examples, since the k-dimension would never be the outermost dimension in the output tensor.
 Finally, this algorithm and the algorithms to decide when and how to distribute the tensors would need to be implemented into the regular einsum evaluation of \texttt{einsum\_ir}, most likely as an optional component.
