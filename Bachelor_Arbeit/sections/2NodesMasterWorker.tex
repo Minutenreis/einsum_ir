@@ -8,13 +8,23 @@
     Performance of einsum\_ir on an Nvidia Grace CPU Superchip.
     Grace consists of two 72-core CPUs connected via NVLink.
     The contraction used is $m_0c_0k_0k_1m_1, n_0c_0k_0n_0n_1 \rightarrow m_0n_0c_0n_1m_1$ with $|c_0|=2$, $|m_0|=|n_0|=|k_0|$ and $|m_1|=|n_1|=|k_1|=70$.
-  }
+    JIT compilation times of \texttt{einsum\_ir} are included in the measurement.
+    }
   \label{fig:perf_threads}
 \end{figure}
 
 \texttt{einsum\_ir} is scaling well across a single NUMA domain as seen in Figure \ref{fig:perf_threads} before 72 threads.
 As soon as a second NUMA domain gets included, in the Figure \ref{fig:perf_threads} after 72 threads, the performance drops significantly.
 Even at 144 threads the performance is only improved by 24\%.
+
+%TODO: NEW BLOCK, THINK BEFORE SUBMITTING THIS
+Before thinking about individual algorithms we should first think about which type of parallelism is appropriate.
+There are three popular parallelism models in machine learning, being data parallelism, pipeline parallelism and tensor parallelism \cite{megatronLM}.
+Data parallelism cannot be applied to individual einsum trees and is specific to the machine learning application.
+Between the remaining pipeline and tensor parallelism I decided to implement the latter.
+Tensor parallelism is more suited towards scaling within a multi socket system as the main drawback, higher communication requirements, are lessened by the faster interconnect speeds between sockets compared to network latencies.
+%TODO: nochmal drüber lesen, sobald ich wieder wach genug bin!
+
 
 As a first algorithm we will think of a master worker architecture to improve performance across NUMA domains.
 Since the main hardware target were dual socket servers, like the Nvidia Grace CPU Superchip, we will restrict our algorithm to two processes.

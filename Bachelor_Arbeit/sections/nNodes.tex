@@ -110,8 +110,13 @@ This is the first algorithm we will employ a ringlike communication scheme.
 As with the master worker algorithm each process employs a dedicated communication thread.
 This simply means that each process $i$ can only communicate with process $i-1$, called previous process, and process $i+1$, called next process.
 Each process $i$ starts by contracting its local chunks $A_i$ and $B_i$ to calculate $C_{i,i}$.
-Simultaneously each process sends its chunk $B_i$ to the previous process and receives the chunk $B_{i+1}$ from the next process.
+Simultaneously each process sends its chunk $B_i$ to the previous process and receives the chunk $B_{i+1}$ from the next process, employing additional memory in the size of another chunk of $B$.
 This repeats $p$ times after which all chunks of $C_{i}$ are calculated on each process $i$ and get concatenated to $C_i$.
+
+In the implementation I omitted the final communication of $B$ chunks, since I assumed that the input tensors would not need to be reused.
+In the case of no reuse, this could slightly speed up the algorithm.
+This assumption no longer holds true if the input tensors need to be used multiple times, such as in inference workloads.
+If that was the case it would also be necessary to copy the final chunk to the input tensor from the additional memory, should the number of processes be uneven.
 
 In the implementation we can make the final concatenation implicit as long as we contract each chunk $C_{i,j}$ already with the correct strides into the output tensor $C_i$.
 Due to limitations in the binary contraction described in Section \ref{sec:einsum_ir} this is only possibly should each chunk $C_{i,j}$ be contiguous in $C_i$.
