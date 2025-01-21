@@ -19,7 +19,7 @@ Given sufficiently large einsum trees with sufficiently large tensors the initia
 Larger tensors also generally have a higher compute intensity enabling a high throughput despite the lower interconnect speeds compared to local memory speeds.
 These assumptions indicate that the proposed algorithms need a minimum tensor size to show improvements over the base \texttt{einsum\_ir} implementation.
 
-Assumption 4 is merely necessary to simplify the algorithms worked on for this paper.
+Assumption 4 is merely necessary to simplify the algorithms for this thesis.
 Should assumption 4 not hold true, for example if a dimension $o$ with $|o|=14$ gets distributed across $p=4$ processes, the data could be distributed across processes with the processes $p_1,p_2,p_3,p_4$ receiving $4,4,3,3$ or $4,4,4,2$ parts respectively.
 In either case each communication and contraction would merely need at most four variants depending on both input tensor states, either having a "full" chunk with $|o'|=4$ parts or a "partial" chunk with either $|o''|=3$ or $|o''|=2$ parts.
 
