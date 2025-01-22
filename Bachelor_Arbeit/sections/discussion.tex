@@ -36,7 +36,7 @@ First we compare the performance of the master-worker algorithm with the distrib
 We evaluate these algorithms on the einsum expression $c_0m_0k_0k_1m_1, c_0n_0k_0n_1k_1 \rightarrow c_0m_0n_0n_1m_1$.
 Figure \ref{fig:master_worker_perf} shows, that the distributed c-dimension algorithm performs significantly better than the master-worker algorithm especially for small tensors.
 This is expected since the distributed c-dimension algorithm performs no communication and thus is not slowed down on small tensors by a low compute intensity which suffers more from slower interconnect speeds.
-Its advantages diminish the higher the compute intensity is, as seen from $|m_0|=|n_0|=|k_0|= 180$ onwards.
+Its advantages diminish the higher the compute intensity is, as observed from $|m_0|=|n_0|=|k_0|= 180$ onwards.
 At $|m_0|=|n_0|=|k_0|= 384$ the master-worker algorithm even performs better than the distributed c-dimension algorithm.
 I could not test larger sizes as the messages got to big for MPI, which uses a 32-bit signed integer for the element count and due to time constraints I could not rewrite the methods to send multiple smaller messages instead.
 The overall result still shows the greater potential in a distributed algorithm, as it can scale easier to more nodes and performs better on most sizes, at least those I could test.

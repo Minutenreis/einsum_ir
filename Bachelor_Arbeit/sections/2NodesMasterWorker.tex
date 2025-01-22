@@ -13,7 +13,7 @@
 \end{figure}
 
 \texttt{einsum\_ir} already implements shared memory parallelization with OpenMP\cite{openMP}, so it can already exploit all CPU cores on a single NUMA domain.
-But as shown in Figure \ref{fig:perf_threads} the performance breaks down as soon as more than one NUMA domain is used.
+But the performance breaks down as soon as more than one NUMA domain is used, as shown in Figure \ref{fig:perf_threads}.
 Even using all threads on Grace improves the performance by merely 24\% over only using one socket.
 The goal of this thesis is to improve this scaling behavior across NUMA domains.
 
@@ -34,7 +34,7 @@ As our first algorithm we think of a master-worker architecture to improve perfo
 Since the main hardware target were dual socket servers, like the Nvidia Grace CPU Superchip, we restrict our algorithm to two processes.
 This also trivially ensures that the communication is balanced between all processes.
 The basic premise of this algorithm is treating the worker as a matrix accelerator where you send parts of the input matrix to and receive the corresponding parts of the output matrix from.
-Since both NUMA domains should ideally be equally fast we cut all tensor across one c-dimension $c_0$ into $|c_0|$ chunks, with the master working on the first $\left \lceil{\frac{|c_0|}{2}}\right \rceil $ chunks together as one big contraction and send  the remaining  $\left \lfloor{\frac{|c_0|}{2}}\right \rfloor$ chunks to the worker to process them in parallel to the master process.
+Since both NUMA domains should ideally be equally fast we cut all tensor across one c-dimension $c_0$ into $|c_0|$ chunks, with the master working on the first $\left \lceil{\frac{|c_0|}{2}}\right \rceil $ chunks together as one big contraction and send the remaining  $\left \lfloor{\frac{|c_0|}{2}}\right \rfloor$ chunks to the worker to process them in parallel to the master process.
 To enable the overlap of communicating with the other process and computing the chunks, each process uses one of its thread exclusively as communication thread.
 This thread is solely responsible for communicating the input chunks from the master to the worker and the output chunks from the worker back to the master.
 
@@ -75,6 +75,6 @@ This is possible since all $A$ and $B$ chunks are used in the next step after th
 The time in the contraction where the worker does not use its compute threads takes only as long as the time to communicate a chunk of each $A$, $B$ and $C$ (the first and last row in the table), so this time gets reduced the larger $|c_0|$ is.
 This is somewhat restricted by a more granular split also increasing synchronization overheads though.
 It should be noted that the $|c_0|$ dimension has to be the outermost dimension of $A$, $B$ and $C$ in the implementation I developed.
-This is caused by the restriction in the binary contraction interface to only work on contiguous memory as noted in Section \ref{sec:einsum_ir}.
+This is caused by the restriction in the binary contraction interface to only work on contiguous memory, as noted in Section \ref{sec:einsum_ir}.
 To fix this limitation the contraction interface would need to support strided tensors, for example by supplying a pointer to the first entry and offsets for each dimension.
 The MPI calls would also need to be adjusted to a custom datatype describing the strided tensors instead of sending contiguous chunks.

@@ -110,7 +110,7 @@ Each process $p_i$ starts by contracting its local chunks $A_i$ and $B_i$ to cal
 Simultaneously each process sends its chunk $B_i$ to the previous process and receives the chunk $B_{i+1}$ from the next process.
 We use additional memory in size of one chunk $|B_{i+1}|$ to implement the communication.
 This repeats $p$ times after which all chunks $C_{i,j}$ are calculated on each process $p_i$ and get concatenated to $C_i$.
-An example for $p=4$ and the binary contraction $mk, kn \rightarrow mn$ can be seen in Figure \ref{fig:m_n_algo_a}.
+An example for $p=4$ and the binary contraction $mk, kn \rightarrow mn$ is shown in Figure \ref{fig:m_n_algo_a}.
 
 In the implementation I omitted the final communication of $B$'s chunks, since I assumed that the input tensors would not need to be reused.
 In the case of no reuse, this should slightly speed up the algorithm.
@@ -122,9 +122,9 @@ Due to limitations in the binary contraction described in Section \ref{sec:einsu
 To fulfill that the implementation has to restrict the $m_0$-dimension to be the outermost dimension of $C$.
 
 We could also consider another very similar algorithm where chunks of $A$ get sent and $C$ is distributed over $n_0$ instead.
-Such an algorithm is omitted here, since the same effect can be achieved by swapping the input tensors as $A' \coloneqq B$ and $B' \coloneqq A$, which results in $A',B' \rightarrow C$.
+Such an algorithm is omitted here, since the same effect can be achieved by swapping the input tensors with $A' \coloneqq B$ and $B' \coloneqq A$, which results in $A',B' \rightarrow C$.
 
-The algorithm employs a ring-like communication pattern to reduce memory usage as shown in Figure \ref{fig:m_n_algo_b}.
+The algorithm employs a ring-like communication pattern to reduce memory usage, as shown in Figure \ref{fig:m_n_algo_b}.
 Instead of moving all the tensors in each time step, one could imagine an algorithm where each process keeps its chunk $B_i$ and sends them directly to each other process.
 Each process still needs one tensor to contract on and another to handle the communication at the same time.
 Since the initial tensor $B_i$ may no longer be moved now, this takes an additional buffer of size $|B_i|$.
@@ -199,18 +199,18 @@ Imagine $A$ and $B$ are distributed over a k-dimension $k_0$, $C$ is distributed
 As described in Section \ref{sec:einsum_expr}, each process $p_i$ could just compute its partial update $A_i, B_i \rightarrow C_i$ and then add them together with the other processes.
 This means that each process has to hold a partial update for all values in the output tensor.
 To reduce the memory footprint we augment the algorithm by calculating only chunks of the partial updates of $C$ by cutting it along $n_0$.
-The basic idea is that each process gets a partial chunk from the next process, adds its own update on top and then sends the update to the previous process, employing a ring like communication scheme as shown in Figure \ref{fig:m_n_algo_b}.
+The basic idea is that each process gets a partial chunk from the next process, adds its own update on top and then sends the update to the previous process, employing a ring like communication scheme, as shown in Figure \ref{fig:m_n_algo_b}.
 If each process starts with the chunk of its next neighbour, each process ends with its own chunks of the output tensor.
 To overlap computation and communication we further cut each chunk in half over $m_0$, we call these subchunks.
 This enables each process to calculate a subchunk in each step while sending the last subchunk it calculated to the previous process and get the next chunk it needs from the next process.
 
-An example of how this would look from the perspective of process $p_0$ is seen in Figure \ref{fig:k_algo_a}.
+An example of how this would look from the perspective of process $p_0$ is shown in Figure \ref{fig:k_algo_a}.
 We use the output chunk as memory during the algorithm to save on memory needs, which are visualized in Figure \ref{fig:k_algo_b} as the two connected subchunks.
 We need additional memory for a third subchunk so we can simultaneously send the last update, calculate the current one and receive the next one.
 This is visualized in \ref{fig:k_algo_b} as the single subchunk next to the connected subchunks.
 To ensure that the updates end in the output tensor and not in the additional memory, we use the observation that the roles of the subchunk changes in each step in the order $\texttt{recv} \rightarrow \texttt{comp} \rightarrow \texttt{send} \rightarrow \texttt{recv}$ and that after three steps each subchunk has the same role again.
 With that in mind we just need to know the end state we want, which is the bottom left state where the first subchunk of the output chunk gets calculated in the second to last step and the second subchunk gets calculated in the last step, and the number of steps, which equal $2 \cdot p$.
-With that information the role each subchunks starts with is just determinable by a modulo calculation, as seen in Algorithm \ref{alg:k_pseudocode}.
+With that information the role each subchunks starts with is just determinable by a modulo calculation, as shown in Algorithm \ref{alg:k_pseudocode}.
 
 In the implementation this algorithm has additional restrictions.
 Since the contraction interface only works on contiguous memory, $m_0$ has to be the outermost dimension of $A$ and $C$ and $n_0$ has to be the outermost dimension of $B$.
