@@ -3,7 +3,6 @@
 *.fls
 *.synctex.gz
 *.log
-thesis_main.pdf
 *.toc
 *.blg
 *.bbl
