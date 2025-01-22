@@ -23,6 +23,16 @@ echo "****************************"
 echo "*** Installing Einsum IR ***"
 echo "****************************"
 
+# install mpich
+wget https://www.mpich.org/static/downloads/4.2.3/mpich-4.2.3.tar.gz
+tar xfz mpich-4.2.3.tar.gz 
+mkdir mpich
+mkdir tmp_mpich
+cd tmp_mpich
+../mpich-4.2.3/configure -prefix=/home/justus/mpich |& tee c.txt
+make -j 16
+make install
+
 git clone https://github.com/Minutenreis/einsum_ir.git
 cd einsum_ir
 git log | head -n 25
