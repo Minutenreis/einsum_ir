@@ -395,7 +395,7 @@ void benchmark(int64_t size_1, int64_t size_2, char dist_dim) {
     case 'n':
       einsum_split_left_dim = m0;
       einsum_split_right_dim = n0;
-      einsum_split_out_dim = n0;
+      einsum_split_out_dim = m0;
       dim_sizes[m0] /= num_ranks;
       dim_sizes[n0] /= num_ranks;
       break;

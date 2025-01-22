@@ -10,7 +10,7 @@ The contractions are hard-coded in the current implementation.
 \textbf{Platform.}
 The algorithms were tested on a server with an Nvidia Grace CPU Superchip in the Uni Jena and on an AWS g8c.metal-48xl Graviton instance.
 All programs were compiled and executed with \texttt{g++} and \texttt{MPICH}.
-\texttt{einsum\_ir} was used \texttt{LIBXSMM} and  used \texttt{OpenBLAS} as \texttt{BLAS} routines on Graviton.
+\texttt{einsum\_ir} used \texttt{LIBXSMM}, \texttt{Torch} and  \texttt{OpenBLAS} on Graviton.
 On Grace \texttt{einsum\_ir} used Nvidia's \texttt{NVPL BLAS} instead of \texttt{OpenBLAS}.
 
 \textbf{Measurements.}

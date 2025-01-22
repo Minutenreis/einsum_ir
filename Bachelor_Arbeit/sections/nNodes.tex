@@ -15,7 +15,7 @@ As basis for such algorithms, we make the following assumptions:
     \item each process has multiple threads.
 \end{enumerate}
 
-Given sufficiently large einsum trees with sufficiently large tensors the initial predistribution of the input tensors and the final gather of the output tensor consume a negligible amount of time compared to the evaluation of the tree.
+Given sufficiently large einsum trees with sufficiently large tensors the initial distribution of the input tensors and the final gather of the output tensor consume a negligible amount of time compared to the evaluation of the tree.
 Larger tensors also generally have a higher compute intensity enabling a high throughput despite the lower interconnect speeds compared to local memory speeds.
 These assumptions indicate that the proposed algorithms need a minimum tensor size to show improvements over the base \texttt{einsum\_ir} implementation.
 

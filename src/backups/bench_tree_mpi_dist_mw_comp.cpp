@@ -19,10 +19,6 @@ struct Tensor {
   datatype *data;               // pointer to data
 };
 
-/**
- * IMPORTANT: After each function call, the data of the input tensor is arbitrary.
- */
-
 // expect dim_sizes to be fitting the distributed tensor and not the original
 void contract_distributed_c(Tensor &left, Tensor &right, Tensor &out, std::map<int64_t, int64_t> dim_sizes) {
   einsum_ir::backend::BinaryContractionTpp bin_cont;
@@ -257,9 +253,9 @@ void contract_distributed_k(Tensor &left, Tensor &right, Tensor &out, std::map<i
   delete[] new_buffer;
 }
 
-void benchmark(int64_t size_1, int64_t size_2) {
+void benchmark(int64_t size_1, int64_t size_2, char dist_dim) {
   std::chrono::steady_clock::time_point tp0, tp1;
-  std::chrono::duration<double> dur, dur_mpi;
+  std::chrono::duration<double> dur_mpi;
 
   const int64_t l_size_c0 = 2;
 
@@ -304,9 +300,9 @@ void benchmark(int64_t size_1, int64_t size_2) {
   l_dim_sizes.insert(std::pair<int64_t, int64_t>(k0, l_size_k0));
   l_dim_sizes.insert(std::pair<int64_t, int64_t>(k1, l_size_k1));
 
-  std::vector<int64_t> l_dim_ids_in_left({m0, c0, k0, k1, m1});
-  std::vector<int64_t> l_dim_ids_in_right({n0, c0, k0, n1, k1});
-  std::vector<int64_t> l_dim_ids_out({m0, n0, c0, n1, m1});
+  std::vector<int64_t> l_dim_ids_in_left({c0, m0, k0, k1, m1});
+  std::vector<int64_t> l_dim_ids_in_right({c0, n0, k0, n1, k1});
+  std::vector<int64_t> l_dim_ids_out({c0, m0, n0, n1, m1});
 
   at::Tensor l_ten_left;
   at::Tensor l_ten_right;
@@ -337,8 +333,8 @@ void benchmark(int64_t size_1, int64_t size_2) {
                                      l_size_k0, // 3
                                      l_size_k1, // 4
                                  })
-                     //        m0 c0 k0 k1 m1
-                     .permute({1, 0, 3, 4, 2})
+                     //        c0 m0 k0 k1 m1
+                     .permute({0, 1, 3, 4, 2})
                      .contiguous();
 
     l_ten_right = l_ten_right.view({
@@ -348,8 +344,8 @@ void benchmark(int64_t size_1, int64_t size_2) {
                                        l_size_k0, // 3
                                        l_size_k1, // 4
                                    })
-                      //        n0 c0 k0 n1 k1
-                      .permute({1, 0, 3, 2, 4})
+                      //        c0 n0 k0 n1 k1
+                      .permute({0, 1, 3, 2, 4})
                       .contiguous();
 
     l_ten_out = l_ten_out.view({
@@ -359,31 +355,13 @@ void benchmark(int64_t size_1, int64_t size_2) {
                                    l_size_m0, // 3
                                    l_size_m1, // 4
                                })
-                    //        m0 n0 c0 n1 m1
-                    .permute({3, 1, 0, 4, 2})
+                    //        c0 m0 n0 n1 m1
+                    .permute({0, 3, 1, 4, 2})
                     .contiguous();
 
     left = {l_dim_ids_in_left, l_size_left, l_ten_left.data_ptr<datatype>()};
     right = {l_dim_ids_in_right, l_size_right, l_ten_right.data_ptr<datatype>()};
     out = {l_dim_ids_out, l_size_out, l_ten_out.data_ptr<datatype>()};
-
-    tp0 = std::chrono::steady_clock::now();
-    einsum_ir::backend::BinaryContractionTpp bin_cont;
-    bin_cont.init(left.dim_ids.size(), right.dim_ids.size(), out.dim_ids.size(),
-                  &l_dim_sizes, &l_dim_sizes, &l_dim_sizes, nullptr, &l_dim_sizes,
-                  left.dim_ids.data(), right.dim_ids.data(), out.dim_ids.data(),
-                  datatypeEinsum, datatypeEinsum, datatypeEinsum, datatypeEinsum,
-                  einsum_ir::ZERO, einsum_ir::MADD, einsum_ir::UNDEFINED_KTYPE);
-
-    // std::cout << "  compile" << std::endl;
-    bin_cont.compile();
-    bin_cont.threading(omp_get_max_threads() * 4);
-
-    // std::cout << "  contract" << std::endl;
-
-    bin_cont.contract(left.data, right.data, out.data);
-    tp1 = std::chrono::steady_clock::now();
-    dur = std::chrono::duration_cast<std::chrono::duration<double>>(tp1 - tp0);
   }
 
   MPI_Barrier(MPI_COMM_WORLD);
@@ -401,13 +379,39 @@ void benchmark(int64_t size_1, int64_t size_2) {
     std::vector<at::Tensor> right_mpi;
     std::vector<at::Tensor> out_mpi;
 
-    int einsum_split_left_dim = m0;
-    int einsum_split_right_dim = n0;
-    int einsum_split_out_dim = n0;
-
+    int einsum_split_left_dim = 0;
+    int einsum_split_right_dim = 0;
+    int einsum_split_out_dim = 0;
     auto dim_sizes = l_dim_sizes;
-    dim_sizes[m0] /= num_ranks;
-    dim_sizes[n0] /= num_ranks;
+
+    switch (dist_dim) {
+    case 'm':
+      einsum_split_left_dim = m0;
+      einsum_split_right_dim = n0;
+      einsum_split_out_dim = nm0;
+      dim_sizes[m0] /= num_ranks;
+      dim_sizes[n0] /= num_ranks;
+      break;
+    case 'n':
+      einsum_split_left_dim = m0;
+      einsum_split_right_dim = n0;
+      einsum_split_out_dim = m0;
+      dim_sizes[m0] /= num_ranks;
+      dim_sizes[n0] /= num_ranks;
+      break;
+    case 'k':
+      einsum_split_left_dim = k0;
+      einsum_split_right_dim = k0;
+      einsum_split_out_dim = m0;
+      dim_sizes[k0] /= num_ranks;
+      break;
+    case 'c':
+      einsum_split_left_dim = c0;
+      einsum_split_right_dim = c0;
+      einsum_split_out_dim = c0;
+      dim_sizes[c0] /= num_ranks;
+      break;
+    }
 
     int ten_split_left_dim, ten_split_right_dim, ten_split_out_dim;
 
@@ -466,7 +470,21 @@ void benchmark(int64_t size_1, int64_t size_2) {
     MPI_Barrier(MPI_COMM_WORLD);
     tp0 = std::chrono::steady_clock::now();
     // contract
-    contract_distributed_m_n_out_n(left_destributed, right_destributed, out_destributed, dim_sizes);
+
+    switch (dist_dim) {
+    case 'm':
+      contract_distributed_m_n_out_n(left_destributed, right_destributed, out_destributed, dim_sizes);
+      break;
+    case 'n':
+      contract_distributed_m_n_out_m(left_destributed, right_destributed, out_destributed, dim_sizes);
+      break;
+    case 'k':
+      contract_distributed_k(left_destributed, right_destributed, out_destributed, dim_sizes);
+      break;
+    case 'c':
+      contract_distributed_c(left_destributed, right_destributed, out_destributed, dim_sizes);
+      break;
+    }
 
     // for time measurement
     MPI_Barrier(MPI_COMM_WORLD);
@@ -486,10 +504,9 @@ void benchmark(int64_t size_1, int64_t size_2) {
 
       l_ten_out2 = at::cat(out_mpi, ten_split_out_dim).contiguous();
 
-      auto l_gflops = 1.0E-9 * l_n_flops / dur.count();
       auto l_gflops_mpi = 1.0E-9 * l_n_flops / dur_mpi.count();
 
-      std::cout << size_1 << ", " << l_gflops << ", " << l_gflops_mpi << ", " << l_gflops_mpi / l_gflops << std::endl; // size_1
+      std::cout << size_1 << ", " << l_gflops_mpi << std::endl; // size_1
     } else {
       MPI_Send(out_destributed.data, out_destributed.size, datatypeMPI, 0, 0, MPI_COMM_WORLD);
 
@@ -509,15 +526,24 @@ int main(int argc, char const *argv[]) {
 
   at::set_default_dtype(caffe2::TypeMeta::Make<datatype>()); // set default datatype
 
-  if (argc != 2 && argc != 3) {
-    benchmark(96, 86);
+  if (argc < 2 || argc > 4) {
+    benchmark(96, 86, 'c');
   } else if (argc == 2) {
     int size_1 = atoi(argv[1]);
-    benchmark(size_1, 86);
+    benchmark(size_1, 86, 'c');
   } else if (argc == 3) {
     int size_1 = atoi(argv[1]);
     int size_2 = atoi(argv[2]);
-    benchmark(size_1, size_2);
+    benchmark(size_1, size_2, 'c');
+  } else if (argc == 4) {
+    int size_1 = atoi(argv[1]);
+    int size_2 = atoi(argv[2]);
+    char dist_dim = argv[3][0];
+    if (dist_dim != 'c' and dist_dim != 'm' and dist_dim != 'n' and dist_dim != 'k') {
+      std::cerr << "error: invalid distribution dimension" << std::endl;
+      return EXIT_FAILURE;
+    }
+    benchmark(size_1, size_2, dist_dim);
   }
 
   MPI_Finalize();

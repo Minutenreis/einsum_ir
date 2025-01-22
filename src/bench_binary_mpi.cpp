@@ -101,7 +101,7 @@ void blocked_binary_contraction(int64_t size_1, int64_t size_2) {
                                      l_size_k0, // 3
                                      l_size_k1, // 4
                                  })
-                     //        m0 c0 k0 k1 m1
+                     //        c0 m0 k0 k1 m1
                      .permute({0, 1, 3, 4, 2})
                      .contiguous();
 
@@ -112,7 +112,7 @@ void blocked_binary_contraction(int64_t size_1, int64_t size_2) {
                                        l_size_k0, // 3
                                        l_size_k1, // 4
                                    })
-                      //        n0 c0 k0 n1 k1
+                      //        c0 n0 k0 n1 k1
                       .permute({0, 1, 3, 2, 4})
                       .contiguous();
 
@@ -123,7 +123,7 @@ void blocked_binary_contraction(int64_t size_1, int64_t size_2) {
                                    l_size_m0, // 3
                                    l_size_m1, // 4
                                })
-                    //        m0 n0 c0 n1 m1
+                    //        c0 m0 n0 n1 m1
                     .permute({0, 3, 1, 4, 2})
                     .contiguous();
   }

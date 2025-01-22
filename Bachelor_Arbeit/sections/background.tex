@@ -33,7 +33,6 @@ Einsum expressions allow for a more succinct expression than the typical Tensor 
 Instead of writing $C_{pstuv}=\sum_{q}\sum_{r}A_{pqrs}B_{tuqvr}$ the same contraction is expressed as $A_{pqrs}B_{tuqvr} \rightarrow C_{pstuv}$.
 The summation signs are now implicit.
 Einsum expressions can also describe the contractions of more than 2 tensors\cite{einsum_is_all_you_need}.
-%todo: can I just recommend people to look at resources such as "Einsum is all you need" for an advanced introduction?
 Instead of writing $D_{ij} = \sum_{k}\sum_{l}A_{ik}B_{jkl}C_{il}$ it is expressed as $A_{ik}B_{jkl}C_{il} \rightarrow D_{ij}$.
 All expression in the rest of this thesis are written as simplified einsum expression, either written as $A,B\rightarrow C$, leaving out the indices, or as $pqrs,tuqvr \rightarrow pstuv$, leaving out the tensor variables.
 
